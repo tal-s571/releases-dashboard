@@ -2501,7 +2501,7 @@ function getExecData(){
     ? `Week ${execWeek.num} · ${execWeek.label}`
     : 'All Weeks';
 
-  return {overall,overallPrev,segments,bestDay,bestHour,worstDay,weekLabel,allWeekData,prevByHood,prevWeek};
+  return {overall,overallPrev,segments,bestDay,bestHour,worstDay,weekLabel,allWeekData,prevWeekData,prevByHood,prevWeek};
 }
 
 // ── EXEC SUMMARY SLIDE HELPERS ────────────────────────────────────────────────
@@ -3128,7 +3128,7 @@ function downloadQtyCSV(){
 
 function renderExecSummary(){
   if(!rawData.length) return '<div style="padding:40px;color:var(--t3);text-align:center">No data loaded.</div>';
-  const {overall,overallPrev,weekLabel,prevByHood,allWeekData}=getExecData();
+  const {overall,overallPrev,weekLabel,prevByHood,allWeekData,prevWeekData}=getExecData();
 
   const prevWeekLabel = (()=>{
     const {prevWeek} = getExecData();
@@ -3202,29 +3202,35 @@ function renderExecSummary(){
       ${warns.map(insightCard).join('')}
     </div>`;
 
-  // ── metrofun nests — new cell-type performance vs existing nests ──
+  // ── metrofun nests — new cell-type performance: vs existing nests (same week) AND vs last week ──
   const isMetrofunNest=r=>(r.metrofun_nests||'').toLowerCase().includes('metrofun');
   const metroRows=allWeekData.filter(isMetrofunNest);
   const restRows=allWeekData.filter(r=>!isMetrofunNest(r));
   const metroStats=metroRows.length?computeStats(metroRows):null;
   const restStats=restRows.length?computeStats(restRows):null;
+  const metroRowsPrev=prevWeekData?prevWeekData.filter(isMetrofunNest):null;
+  const metroStatsPrev=metroRowsPrev&&metroRowsPrev.length?computeStats(metroRowsPrev):null;
+  const metroDeltaLine=(label,html)=>html?`<div style="font-size:10px;margin-top:2px;white-space:nowrap"><span style="color:#94A3B8">${label}:</span> ${html}</div>`:'';
   const metroCardHtml=metroStats?`
     <div style="display:flex;flex-wrap:wrap;border:1px solid #BAE6FD;border-radius:8px;overflow:hidden;background:#F0FBFF">
       <div style="padding:10px 16px;border-right:1px solid #BAE6FD">
         <div style="font-size:9px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#0284C7">Releases</div>
         <div style="font-size:20px;font-weight:700;color:#0D1B3E">${fmtN(metroStats.count)}</div>
+        ${metroStatsPrev?metroDeltaLine('vs last week',wow(metroStats.count-metroStatsPrev.count,false,'n',pctOf(metroStats.count-metroStatsPrev.count,metroStatsPrev.count))):''}
       </div>
       <div style="padding:10px 16px;border-right:1px solid #BAE6FD">
         <div style="font-size:9px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#0284C7">Avg GR/RLS</div>
         <div style="font-size:20px;font-weight:700;color:#29C6F0">${fmt$(metroStats.avgGRR)}</div>
-        ${restStats?wow(metroStats.avgGRR-restStats.avgGRR,false,'$',pctOf(metroStats.avgGRR-restStats.avgGRR,restStats.avgGRR)):''}
+        ${restStats?metroDeltaLine('vs other nests',wow(metroStats.avgGRR-restStats.avgGRR,false,'$',pctOf(metroStats.avgGRR-restStats.avgGRR,restStats.avgGRR))):''}
+        ${metroStatsPrev?metroDeltaLine('vs last week',wow(metroStats.avgGRR-metroStatsPrev.avgGRR,false,'$',pctOf(metroStats.avgGRR-metroStatsPrev.avgGRR,metroStatsPrev.avgGRR))):''}
       </div>
       <div style="padding:10px 16px;border-right:1px solid #BAE6FD">
         <div style="font-size:9px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#0284C7">Avg HTR</div>
         <div style="font-size:20px;font-weight:700;color:#475569">${fmtH(metroStats.avgHTR)}</div>
-        ${restStats&&metroStats.avgHTR!=null&&restStats.avgHTR!=null?wow(metroStats.avgHTR-restStats.avgHTR,true,'h',pctOf(metroStats.avgHTR-restStats.avgHTR,restStats.avgHTR)):''}
+        ${restStats&&metroStats.avgHTR!=null&&restStats.avgHTR!=null?metroDeltaLine('vs other nests',wow(metroStats.avgHTR-restStats.avgHTR,true,'h',pctOf(metroStats.avgHTR-restStats.avgHTR,restStats.avgHTR))):''}
+        ${metroStatsPrev&&metroStats.avgHTR!=null&&metroStatsPrev.avgHTR!=null?metroDeltaLine('vs last week',wow(metroStats.avgHTR-metroStatsPrev.avgHTR,true,'h',pctOf(metroStats.avgHTR-metroStatsPrev.avgHTR,metroStatsPrev.avgHTR))):''}
       </div>
-      <div style="padding:10px 16px;display:flex;align-items:center;color:#64748B;font-size:11px">vs. ${fmtN(restStats?restStats.count:0)} releases from existing nests</div>
+      <div style="padding:10px 16px;display:flex;align-items:center;color:#64748B;font-size:11px">vs. ${fmtN(restStats?restStats.count:0)} releases from existing nests${metroStatsPrev?` · ${fmtN(metroStatsPrev.count)} metrofun releases last week`:''}</div>
     </div>`:'';
 
   // ── type table — releases / GR/RLS / HTR, each with WoW ──

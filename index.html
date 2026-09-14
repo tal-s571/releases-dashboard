@@ -3128,7 +3128,7 @@ function downloadQtyCSV(){
 
 function renderExecSummary(){
   if(!rawData.length) return '<div style="padding:40px;color:var(--t3);text-align:center">No data loaded.</div>';
-  const {overall,overallPrev,weekLabel,prevByHood}=getExecData();
+  const {overall,overallPrev,weekLabel,prevByHood,allWeekData}=getExecData();
 
   const prevWeekLabel = (()=>{
     const {prevWeek} = getExecData();
@@ -3172,7 +3172,6 @@ function renderExecSummary(){
   const pctOf=(d,base)=>(base?d/base*100:null);
 
   // ── opportunities & underperforming — across all release types ──
-  const {allWeekData}=getExecData();
   const chargeLabel='all';
   const {opps,warns}=generateInsights(overall);
 
@@ -3202,6 +3201,31 @@ function renderExecSummary(){
       <div style="font-size:9.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#D97706;margin-bottom:6px">▼ Underperforming</div>
       ${warns.map(insightCard).join('')}
     </div>`;
+
+  // ── metrofun nests — new cell-type performance vs existing nests ──
+  const isMetrofunNest=r=>(r.metrofun_nests||'').toLowerCase().includes('metrofun');
+  const metroRows=allWeekData.filter(isMetrofunNest);
+  const restRows=allWeekData.filter(r=>!isMetrofunNest(r));
+  const metroStats=metroRows.length?computeStats(metroRows):null;
+  const restStats=restRows.length?computeStats(restRows):null;
+  const metroCardHtml=metroStats?`
+    <div style="display:flex;flex-wrap:wrap;border:1px solid #BAE6FD;border-radius:8px;overflow:hidden;background:#F0FBFF">
+      <div style="padding:10px 16px;border-right:1px solid #BAE6FD">
+        <div style="font-size:9px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#0284C7">Releases</div>
+        <div style="font-size:20px;font-weight:700;color:#0D1B3E">${fmtN(metroStats.count)}</div>
+      </div>
+      <div style="padding:10px 16px;border-right:1px solid #BAE6FD">
+        <div style="font-size:9px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#0284C7">Avg GR/RLS</div>
+        <div style="font-size:20px;font-weight:700;color:#29C6F0">${fmt$(metroStats.avgGRR)}</div>
+        ${restStats?wow(metroStats.avgGRR-restStats.avgGRR,false,'$',pctOf(metroStats.avgGRR-restStats.avgGRR,restStats.avgGRR)):''}
+      </div>
+      <div style="padding:10px 16px;border-right:1px solid #BAE6FD">
+        <div style="font-size:9px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#0284C7">Avg HTR</div>
+        <div style="font-size:20px;font-weight:700;color:#475569">${fmtH(metroStats.avgHTR)}</div>
+        ${restStats&&metroStats.avgHTR!=null&&restStats.avgHTR!=null?wow(metroStats.avgHTR-restStats.avgHTR,true,'h',pctOf(metroStats.avgHTR-restStats.avgHTR,restStats.avgHTR)):''}
+      </div>
+      <div style="padding:10px 16px;display:flex;align-items:center;color:#64748B;font-size:11px">vs. ${fmtN(restStats?restStats.count:0)} releases from existing nests</div>
+    </div>`:'';
 
   // ── type table — releases / GR/RLS / HTR, each with WoW ──
   const totalRelPrev=overallPrev?overallPrev.count:null;
@@ -3318,6 +3342,10 @@ function renderExecSummary(){
       <div style="${lbl};display:flex;align-items:center;justify-content:space-between">What happened this week — by release type <span style="text-transform:none;letter-spacing:0;font-weight:500;color:#CBD5E1">(vs ${prevWeekLabel})</span> ${csvBtn('by-release-type')}</div>
       ${typeTableHtml}
     </div>
+    ${metroCardHtml?`<div data-tbl style="padding:10px 16px;border-bottom:1px solid #E2E8F0">
+      <div style="${lbl}">🆕 Metrofun Nests — new cell type performance</div>
+      ${metroCardHtml}
+    </div>`:''}
     <div style="display:grid;grid-template-columns:1.15fr 1fr;gap:0;border-bottom:1px solid #E2E8F0">
       <div data-tbl style="padding:10px 16px;border-right:1px solid #E2E8F0">
         <div style="${lbl};display:flex;align-items:center;justify-content:space-between">Top 10 Neighborhoods by Release Volume ${csvBtn('exec-top-neighborhoods')}</div>

@@ -392,7 +392,11 @@ function computeStats(data) {
     if(hr!=null) fill(byHour,hr,grr,htr);
     fill(byDay,day,grr,htr);
     fill(byType,type,grr,htr);
-    if(nestKey) fill(byNest,nestKey,grr,htr);
+    if(nestKey){
+      fill(byNest,nestKey,grr,htr);
+      const q2=(r.nest_quantity!=null&&r.nest_quantity!=='')?parseInt(r.nest_quantity):NaN;
+      if(!isNaN(q2)) byNest[nestKey].qty=q2;
+    }
 
     if(opId){
       if(!byOperator[opId]){
@@ -755,7 +759,7 @@ function updateWeekBar(){
   // Populate dropdown
   const sel=document.getElementById('weekSelect');
   sel.innerHTML='<option value="-1">— select week —</option>'
-    +allWeeks.map((w,i)=>`<option value="${i}">Week ${w.num} &nbsp;${w.label} &nbsp;(${rawData.filter(r=>parseInt(r.release_week)===w.num).length} rel.)</option>`).join('');
+    +allWeeks.map((w,i)=>`<option value="${i}">Week ${w.num} &nbsp;${w.label} &nbsp;(${byCity(rawData.filter(r=>parseInt(r.release_week)===w.num)).length} rel.)</option>`).join('');
   sel.value=currentWeekIdx;
 
   // All-weeks vs single-week button styling
@@ -778,7 +782,7 @@ function updateWeekBar(){
   document.getElementById('curWeekBadge').innerHTML=`<span class="wnum">Week ${cur.num}</span><span class="wdates">&nbsp;${cur.label}&nbsp;·&nbsp;${weekData.length.toLocaleString()} rel.</span>`;
   const cmpBadge=document.getElementById('cmpWeekBadge');
   if(prev){
-    const prevCount=rawData.filter(r=>parseInt(r.release_week)===prev.num).length;
+    const prevCount=byCity(rawData.filter(r=>parseInt(r.release_week)===prev.num)).length;
     cmpBadge.innerHTML=`<span class="wnum">Week ${prev.num}</span><span class="wdates">&nbsp;${prev.label}&nbsp;·&nbsp;${prevCount.toLocaleString()} rel.</span>`;
     cmpBadge.className='cmp-badge'+(compareOn?' active':'');
   } else {
@@ -1086,7 +1090,10 @@ function renderTable(stats, prevStats){
 
   const rows=Object.entries(src)
     .map(([name,d])=>({name,...d}))
-    .sort((a,b)=>sortDir*((b[sortKey]??-Infinity)-(a[sortKey]??-Infinity)));
+    // dir -1 = descending, matching the ↓ arrow. (b-a) here inverted it: with
+    // the default sortDir=-1 it evaluated to (a-b), so the table opened with
+    // the FEWEST releases at the top while showing a ↓.
+    .sort((a,b)=>sortDir*((a[sortKey]??-Infinity)-(b[sortKey]??-Infinity)));
 
   // rank colors by GR/RLS
   const grrVals=rows.map(r=>r.avgGRR);
@@ -1140,7 +1147,7 @@ function renderTable(stats, prevStats){
     {key:'avgHTR', label:'Avg HTR'},
   ];
   if(!isNest){ cols.push({key:'avgQtyPerNest',label:'Qty/Nest'}); cols.push({key:'avgVeh',label:'Nest Veh'}); }
-  if(isNest) cols.push({key:'_nestid',label:'Nest ID',sortable:false});
+  if(isNest){ cols.push({key:'qty',label:'Qty'}); cols.push({key:'_nestid',label:'Nest ID',sortable:false}); }
 
   const ths=cols.map(c=>{
     if(c.sortable===false) return `<th>${c.label}</th>`;
@@ -1161,7 +1168,7 @@ function renderTable(stats, prevStats){
 
   const trs=rows.map(row=>{
     const prevRow=wow&&prevSrc?prevSrc[row.name]:null;
-    const nestIdCell=isNest?`<td style="font-size:10px;color:var(--t3);font-family:monospace">${(nestIdMap[row.name]||'').slice(0,8)}…</td>`:'';
+    const nestIdCell=isNest?`<td style="font-weight:700;color:var(--t1)">${row.qty!=null?row.qty:'—'}</td><td style="font-size:10px;color:var(--t3);font-family:monospace">${(nestIdMap[row.name]||'').slice(0,8)}…</td>`:'';
     const clickAttr=!isNest?`onclick="openDrill('${row.name.replace(/'/g,"\\'")}',event)" style="cursor:pointer" title="Click to see hour & day breakdown"`:'';
     return `<tr ${clickAttr}>
       <td style="font-size:12px">${row.name}${!isNest?` <span style="font-size:10px;color:var(--accent);opacity:.6">↗</span>`:''}
@@ -1654,10 +1661,12 @@ function drillNestData(){
     const grr=parseFloat(r.gross_revenue_24h_usd);
     const htrRaw=(r.hours_to_ride!=null&&r.hours_to_ride!=='')?r.hours_to_ride:r.hours_to_first_ride;
     const htr=parseFloat(htrRaw);
-    if(!m[key]) m[key]={id:r.nest_id||'',addr:r.nest_address||r.nest_id||key,count:0,sumG:0,cntG:0,sumH:0,cntH:0};
+    if(!m[key]) m[key]={id:r.nest_id||'',addr:r.nest_address||r.nest_id||key,count:0,sumG:0,cntG:0,sumH:0,cntH:0,qty:null};
     const b=m[key]; b.count++;
     if(!isNaN(grr)&&grr>0){b.sumG+=grr;b.cntG++;}
     if(!isNaN(htr)&&htr>0){b.sumH+=htr;b.cntH++;}
+    const qty=(r.nest_quantity!=null&&r.nest_quantity!=='')?parseInt(r.nest_quantity):NaN;
+    if(!isNaN(qty)) b.qty=qty;   // nest max_quantity — constant per nest
   });
   return Object.values(m).map(b=>({...b,avgGRR:b.cntG?b.sumG/b.cntG:0,avgHTR:b.cntH?b.sumH/b.cntH:null}));
 }
@@ -1674,7 +1683,9 @@ function drillNestTable(){
   const {key,dir}=drillSort;
   nests.sort((a,b)=>{
     if(key==='addr') return dir*String(a.addr).localeCompare(String(b.addr));
-    return dir*(((b[key]??-Infinity)-(a[key]??-Infinity)));
+    // dir -1 = descending. (b-a) here would invert it: with dir=-1 it
+    // evaluates to (a-b), i.e. ascending, while the header shows a ↓ arrow.
+    return dir*(((a[key]??-Infinity)-(b[key]??-Infinity)));
   });
   const gvals=nests.map(n=>n.avgGRR).filter(v=>v>0).sort((a,b)=>a-b);
   const pill=v=>{
@@ -1690,13 +1701,14 @@ function drillNestTable(){
     <td style="text-align:right">${fmtN(n.count)}</td>
     <td>${pill(n.avgGRR)}</td>
     <td style="text-align:right;color:var(--t2)">${n.avgHTR!=null?n.avgHTR.toFixed(1)+'h':'—'}</td>
+    <td style="text-align:right;font-weight:700;color:var(--t1)">${n.qty!=null?n.qty:'—'}</td>
   </tr>`).join('');
   return `<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px"><span style="font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--t3)">Nests in this neighborhood — ${nests.length} · click a column to sort</span>${csvBtn('nests-'+(_drillHood||'area').replace(/[^a-z0-9]+/gi,'-'))}</div>
     <div style="max-height:280px;overflow-y:auto;border:1px solid var(--border);border-radius:var(--r)">
       <table style="width:100%;border-collapse:collapse;font-size:12px">
         <thead style="position:sticky;top:0;background:var(--s2);z-index:1">
           <tr style="text-align:left;color:var(--t3)">
-            <th style="padding:6px;text-align:right">#</th>${th('addr','Nest')}${th('count','Releases','right')}${th('avgGRR','Avg GR/RLS')}${th('avgHTR','Avg HTR','right')}
+            <th style="padding:6px;text-align:right">#</th>${th('addr','Nest')}${th('count','Releases','right')}${th('avgGRR','Avg GR/RLS')}${th('avgHTR','Avg HTR','right')}${th('qty','Qty','right')}
           </tr>
         </thead>
         <tbody>${rows}</tbody>
@@ -2785,7 +2797,11 @@ function renderQtyOptimizer(){
     const n=nestMap[id];
     n.count++;
     const grr=parseFloat(r.gross_revenue_24h_usd);
-    if(!isNaN(grr)&&grr>0){n.sumGRR+=grr;n.cntGRR++;}
+    // Count $0 releases in the denominator. Excluding them averaged only the
+    // releases that WORKED, so a nest failing 8 of 10 releases scored on the
+    // strength of the 2 that earned. 24.9% of releases earn $0, and that
+    // exclusion made these rows read ~33% above the headline KPI.
+    if(!isNaN(grr)){n.sumGRR+=grr;n.cntGRR++;}
     const htr=parseFloat(r.hours_to_ride!=null&&r.hours_to_ride!==''?r.hours_to_ride:r.hours_to_first_ride);
     if(!isNaN(htr)&&htr>0){n.sumHTR+=htr;n.cntHTR++;}
   });
@@ -2855,9 +2871,14 @@ function renderQtyOptimizer(){
       const ENTER=18, WATCH=10;
       if(n.lowConf){ n.rec='maintain'; }
       else if(gap >= ENTER && aboveAvg) n.rec='increase';          // good nest that's clearly under-supplied
-      else if(gap <= -ENTER && !aboveAvg) n.rec='decrease';        // weak nest that's clearly over-supplied
-      else n.rec='maintain';                                       // matched, or good-but-full / weak-but-lean
-      n.watch = n.rec==='maintain' && !n.lowConf && ((gap>=WATCH && aboveAvg) || (gap<=-WATCH && !aboveAvg));
+      // Decrease is NOT gated on absolute score. `score` is centred on 50 by
+      // construction, so requiring score<50 made the top half of the fleet
+      // structurally un-shrinkable however oversupplied it was (49 nests were
+      // stuck at >=18pts oversupplied). `gap` already carries the relative
+      // judgement — double-gating on the median only froze it.
+      else if(gap <= -ENTER) n.rec='decrease';                      // clearly over-supplied for its performance
+      else n.rec='maintain';                                        // matched, or inside the dead-band
+      n.watch = n.rec==='maintain' && !n.lowConf && ((gap>=WATCH && aboveAvg) || gap<=-WATCH);
       // Target = the quantity whose qty-score matches performance (invert the
       // z-score mapping), clamped 1–12. Move toward it, but no more than ±2 at
       // once so no nest jumps too far in a single run; direction stays gated.
@@ -3054,7 +3075,7 @@ function renderQtyOptimizer(){
       <div style="padding:0 16px 14px;display:grid;grid-template-columns:1fr 1fr;gap:16px">
         <div>
           <div style="font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--accent);margin-bottom:6px">Performance Score</div>
-          <div style="font-size:12px;color:var(--t2);line-height:1.7">Each metric is measured as standard deviations from the fleet average (z-score) → 0–100 with the average nest at 50. Combined <strong style="color:var(--accent)">50% GR/RLS + 50% HTR</strong> (HTR inverted — faster pickup is better). Missing HTR scores a neutral 50.</div>
+          <div style="font-size:12px;color:var(--t2);line-height:1.7">Each metric is measured as standard deviations from the fleet average (z-score) → 0–100 with the average nest at 50. Combined <strong style="color:var(--accent)">50% GR/RLS + 50% HTR</strong> (HTR inverted — faster pickup is better). Missing HTR scores a neutral 50. GR/RLS here is revenue per release <strong>counting $0 releases</strong>, so a nest that often fails scores lower.</div>
         </div>
         <div>
           <div style="font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--accent);margin-bottom:6px">Quantity Score</div>
@@ -3064,7 +3085,7 @@ function renderQtyOptimizer(){
       <div style="padding:0 16px 14px;display:flex;gap:20px;flex-wrap:wrap">
         <div style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--t2)"><span style="color:var(--good);font-weight:700">▲ Increase</span> Under-supplied by 18+ pts <em style="color:var(--t3)">and</em> performs above average</div>
         <div style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--t2)"><span style="color:var(--accent);font-weight:700">— Maintain</span> Matched — or a strong nest that's already full / a weak one already lean</div>
-        <div style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--t2)"><span style="color:var(--bad);font-weight:700">▼ Decrease</span> Over-supplied by 18+ pts <em style="color:var(--t3)">and</em> performs below average</div>
+        <div style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--t2)"><span style="color:var(--bad);font-weight:700">▼ Decrease</span> Over-supplied by 18+ pts relative to its own performance</div>
         <div style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--t2)"><span style="color:var(--bad);font-weight:700">⏻ Turn Off</span> Only the very worst — a confidently-sampled nest scoring below 15/100 that's already at qty 1</div>
         <div style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--t2)"><span style="color:var(--accent);font-weight:700">↻ Renew</span> A nest currently off (qty 0) is brought back to 1 to re-test — it has no fresh data to judge</div>
       </div>
@@ -3278,7 +3299,7 @@ function renderExecSummary(){
       </tr></thead>
       <tbody>${topHoods.map((h,i)=>{
         const ph=prevByHood[h.name];
-        const gD=ph&&ph.avgGRR?h.avgGRR-ph.avgGRR:null;
+        const gD=ph?h.avgGRR-ph.avgGRR:null;
         const relD=ph?h.count-ph.count:null;
         const bw=Math.round((h.count/maxHoodCount)*46);
         return `<tr style="border-bottom:1px solid #F1F5F9">

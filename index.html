@@ -351,31 +351,38 @@ function getPrevData() {
 // ── AGGREGATION ─────────────────────────────────────────────────────────────
 function computeStats(data) {
   if(!data||!data.length) return null;
-  let sumGRR=0,cntGRR=0,sumHTR=0,cntHTR=0,totalRev=0;
+  let sumGRR=0,cntGRR=0,sumHTR=0,cntHTR=0,totalRev=0,cnt24h=0;
   const htrVals=[];
   const byHood={},byHour={},byDay={},byType={},byNest={},byOperator={};
 
   function bucket(map,key){
-    if(!map[key]) map[key]={count:0,sumGRR:0,cntGRR:0,sumHTR:0,cntHTR:0,totalRev:0};
+    if(!map[key]) map[key]={count:0,sumGRR:0,cntGRR:0,sumHTR:0,cntHTR:0,totalRev:0,cnt24h:0};
     return map[key];
   }
-  function fill(map,key,grr,htr){
+  function fill(map,key,grr,htr,captured24h){
     const b=bucket(map,key);
     b.count++;
     b.totalRev+=grr||0;
     if(grr!=null&&grr>0){b.sumGRR+=grr;b.cntGRR++;(b.grrVals||(b.grrVals=[])).push(grr);}
-    // htr (hours_to_ride) is already capped to 24h at the SQL level, so
-    // cntHTR/count here IS the ride-capture-rate-within-24h — see
-    // captureRate24h below. Using the median (not mean) for HTR itself:
-    // the mean is dragged around by whichever releases happen to sit near
-    // the 24h cutoff, which is exactly the instability this was built to
-    // avoid.
+    // htr (hours_to_ride) now uses a week-scoped cutoff (see the SQL header),
+    // not a flat 24h window, so it can no longer double as the 24h capture
+    // rate — that's tracked separately via captured24h (rides_24h > 0) below.
+    // Using the median (not mean) for HTR itself: the mean is dragged around
+    // by whichever releases happen to sit near the cutoff, which is exactly
+    // the instability this was built to avoid.
     if(htr!=null){b.sumHTR+=htr;b.cntHTR++;(b.htrVals||(b.htrVals=[])).push(htr);}
+    if(captured24h) b.cnt24h++;
   }
 
   for(const r of data){
     const grr=n(r.gross_revenue_24h_usd);
     const htr=n(r.hours_to_ride);
+    // rides_24h is a strict, fixed 24h window (same as gross_revenue_24h_usd)
+    // regardless of where in the week the release falls — unlike
+    // hours_to_ride, which now uses a week-scoped cutoff. This is the basis
+    // for the Ride Capture metric, deliberately kept independent of HTR.
+    const rides24h=n(r.rides_24h);
+    const captured24h=rides24h!=null&&rides24h>0;
     const hood=r.neighborhood||'Unknown';
     const hr=r.release_hour!==''?parseInt(r.release_hour):null;
     const day=r.release_weekday_name||'Unknown';
@@ -386,8 +393,9 @@ function computeStats(data) {
     totalRev+=grr||0;
     if(grr!=null){sumGRR+=grr;cntGRR++;} // include $0 releases — they ARE zero-revenue events
     if(htr!=null){sumHTR+=htr;cntHTR++;htrVals.push(htr);}
+    if(captured24h) cnt24h++;
 
-    fill(byHood,hood,grr,htr);
+    fill(byHood,hood,grr,htr,captured24h);
     // per-hood extras: avg street vehicles & per-nest quantity
     {
       const hb=byHood[hood];
@@ -396,11 +404,11 @@ function computeStats(data) {
       const qty=(r.nest_quantity!=null&&r.nest_quantity!=='')?parseInt(r.nest_quantity):NaN;
       if(r.nest_id&&!isNaN(qty)){hb.nestQty=hb.nestQty||{};hb.nestQty[r.nest_id]=qty;}
     }
-    if(hr!=null) fill(byHour,hr,grr,htr);
-    fill(byDay,day,grr,htr);
-    fill(byType,type,grr,htr);
+    if(hr!=null) fill(byHour,hr,grr,htr,captured24h);
+    fill(byDay,day,grr,htr,captured24h);
+    fill(byType,type,grr,htr,captured24h);
     if(nestKey){
-      fill(byNest,nestKey,grr,htr);
+      fill(byNest,nestKey,grr,htr,captured24h);
       const q2=(r.nest_quantity!=null&&r.nest_quantity!=='')?parseInt(r.nest_quantity):NaN;
       if(!isNaN(q2)) byNest[nestKey].qty=q2;
     }
@@ -411,7 +419,7 @@ function computeStats(data) {
           id:opId,
           name:r.operator_name||r.operator_email||opId,
           email:r.operator_email||'',
-          count:0,sumGRR:0,cntGRR:0,sumHTR:0,cntHTR:0,totalRev:0,htrVals:[],
+          count:0,sumGRR:0,cntGRR:0,sumHTR:0,cntHTR:0,totalRev:0,htrVals:[],cnt24h:0,
           hoodCounts:{}
         };
       }
@@ -420,6 +428,7 @@ function computeStats(data) {
       ob.totalRev+=grr||0;
       if(grr!=null&&grr>0){ob.sumGRR+=grr;ob.cntGRR++;}
       if(htr!=null){ob.sumHTR+=htr;ob.cntHTR++;ob.htrVals.push(htr);}
+      if(captured24h) ob.cnt24h++;
       ob.hoodCounts[hood]=(ob.hoodCounts[hood]||0)+1;
     }
   }
@@ -436,7 +445,7 @@ function computeStats(data) {
       // note in fill(). Kept under the same field name so every existing
       // reader (tables, KPIs, insights) picks it up without further changes.
       b.avgHTR=median(b.htrVals);
-      b.captureRate24h=b.count>0?b.cntHTR/b.count:null;
+      b.captureRate24h=b.count>0?b.cnt24h/b.count:null;
       b.medianGRR=median(b.grrVals);
     });
   }
@@ -450,7 +459,7 @@ function computeStats(data) {
   Object.values(byOperator).forEach(ob=>{
     ob.avgGRR=ob.cntGRR>0?ob.sumGRR/ob.cntGRR:0;
     ob.avgHTR=median(ob.htrVals);
-    ob.captureRate24h=ob.count>0?ob.cntHTR/ob.count:null;
+    ob.captureRate24h=ob.count>0?ob.cnt24h/ob.count:null;
     ob.mainHood=Object.entries(ob.hoodCounts).sort((a,b)=>b[1]-a[1])[0]?.[0]||'—';
   });
 
@@ -458,7 +467,7 @@ function computeStats(data) {
     count:data.length, totalRev,
     avgGRR:cntGRR>0?sumGRR/cntGRR:0,
     avgHTR:median(htrVals),
-    captureRate24h:data.length>0?cntHTR/data.length:null,
+    captureRate24h:data.length>0?cnt24h/data.length:null,
     byHood,byHour,byDay,byType,byNest,byOperator
   };
 }
@@ -882,15 +891,17 @@ function renderCityComparison(data, prevData){
       const grr=parseFloat(r.gross_revenue_24h_usd);
       const htrRaw=(r.hours_to_ride!=null&&r.hours_to_ride!=='')?r.hours_to_ride:r.hours_to_first_ride;
       const htr=parseFloat(htrRaw);
-      if(!m[c]) m[c]={city:c,count:0,sumG:0,cntG:0,htrVals:[],rev:0};
+      const rides24h=parseFloat(r.rides_24h);
+      if(!m[c]) m[c]={city:c,count:0,sumG:0,cntG:0,htrVals:[],cnt24h:0,rev:0};
       const b=m[c]; b.count++;
       if(!isNaN(grr)){ b.rev+=grr; if(grr>0){b.sumG+=grr;b.cntG++;} }
       if(!isNaN(htr)&&htr>0){ b.htrVals.push(htr); }
+      if(!isNaN(rides24h)&&rides24h>0){ b.cnt24h++; }
     });
     return m;
   };
   const cur=agg(data), prev=agg(prevData);
-  let cities=Object.values(cur).map(b=>({...b,avgGRR:b.cntG?b.sumG/b.cntG:0,avgHTR:median(b.htrVals),captureRate24h:b.count?b.htrVals.length/b.count:null}))
+  let cities=Object.values(cur).map(b=>({...b,avgGRR:b.cntG?b.sumG/b.cntG:0,avgHTR:median(b.htrVals),captureRate24h:b.count?b.cnt24h/b.count:null}))
     .sort((a,b)=>b.count-a.count);
   if(cities.length<2) return '';
   const totalRel=cities.reduce((s,c)=>s+c.count,0);
@@ -904,11 +915,11 @@ function renderCityComparison(data, prevData){
     const abs=fmt==='$'?'$'+Math.abs(d).toFixed(2):fmt==='h'?Math.abs(d).toFixed(1)+'h':fmtN(Math.round(Math.abs(d)));
     return `<span style="color:${col};font-weight:700;font-size:10.5px">${d>0?'▲ +':'▼ '}${abs}</span>`;
   };
-  const head=['#','City','Releases','Share',...(showWoW?['Δ WoW']:[]),'Avg GR/RLS',...(showWoW?['Δ WoW']:[]),'Med HTR',...(showWoW?['Δ WoW']:[]),'Capture']
+  const head=['#','City','Releases','Share',...(showWoW?['Δ WoW']:[]),'Avg GR/RLS',...(showWoW?['Δ WoW']:[]),'Med HTR',...(showWoW?['Δ WoW']:[]),'Capture (24h)']
     .map(h=>`<th style="padding:6px 10px;text-align:left;font-size:9px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--t3);white-space:nowrap">${h}</th>`).join('');
   const rows=cities.map((c,i)=>{
     const p=prev[c.city];
-    const pv=p?{count:p.count,avgGRR:p.cntG?p.sumG/p.cntG:0,avgHTR:median(p.htrVals),captureRate24h:p.count?p.htrVals.length/p.count:null}:null;
+    const pv=p?{count:p.count,avgGRR:p.cntG?p.sumG/p.cntG:0,avgHTR:median(p.htrVals),captureRate24h:p.count?p.cnt24h/p.count:null}:null;
     const share=(c.count/totalRel*100).toFixed(0);
     const bw=Math.round((c.count/maxRel)*70);
     return `<tr onclick="selectCity('${c.city.replace(/'/g,"\\'")}')" style="cursor:pointer;border-bottom:1px solid var(--border)" title="Open ${c.city}'s dashboard">
@@ -1040,9 +1051,9 @@ function renderKPIs(s,p){
       ${htrDelta}
     </div>
     <div class="kpi">
-      <div class="kpi-label">Ride Capture</div>
+      <div class="kpi-label">Ride Capture (24h)</div>
       <div class="kpi-value${captureCls?' '+captureCls:''}">${s.captureRate24h!=null?(s.captureRate24h*100).toFixed(1)+'%':'—'}</div>
-      <div class="kpi-sub">releases ridden by week close</div>
+      <div class="kpi-sub">releases ridden within 24h</div>
       ${captureDelta}
     </div>
   </div>`;
@@ -1172,7 +1183,7 @@ function renderTable(stats, prevStats){
     {key:'avgGRR', label:'Avg GR/RLS'},
     {key:'totalRev',label:'Total Rev'},
     {key:'avgHTR', label:'Med HTR'},
-    {key:'captureRate24h', label:'Capture'},
+    {key:'captureRate24h', label:'Capture (24h)'},
   ];
   if(!isNest){ cols.push({key:'avgQtyPerNest',label:'Qty/Nest'}); cols.push({key:'avgVeh',label:'Nest Veh'}); }
   if(isNest){ cols.push({key:'qty',label:'Qty'}); cols.push({key:'_nestid',label:'Nest ID',sortable:false}); }
@@ -1242,7 +1253,7 @@ function renderOperatorTable(stats, prevStats){
     return `<span class="pill ${cls}">${fmt$(v)}</span>`;
   }
 
-  const ths=`<th>Operator</th><th>Releases</th><th>Avg GR/RLS</th><th>Main Neighborhood</th><th>Med HTR</th><th>Capture</th>`
+  const ths=`<th>Operator</th><th>Releases</th><th>Avg GR/RLS</th><th>Main Neighborhood</th><th>Med HTR</th><th>Capture (24h)</th>`
     +(showDelta?`<th>Δ Releases</th><th>Δ GR/RLS</th>`:'');
 
   const trs=rows.map(op=>{
@@ -1690,14 +1701,16 @@ function drillNestData(){
     const grr=parseFloat(r.gross_revenue_24h_usd);
     const htrRaw=(r.hours_to_ride!=null&&r.hours_to_ride!=='')?r.hours_to_ride:r.hours_to_first_ride;
     const htr=parseFloat(htrRaw);
-    if(!m[key]) m[key]={id:r.nest_id||'',addr:r.nest_address||r.nest_id||key,count:0,sumG:0,cntG:0,htrVals:[],qty:null};
+    const rides24h=parseFloat(r.rides_24h);
+    if(!m[key]) m[key]={id:r.nest_id||'',addr:r.nest_address||r.nest_id||key,count:0,sumG:0,cntG:0,htrVals:[],cnt24h:0,qty:null};
     const b=m[key]; b.count++;
     if(!isNaN(grr)&&grr>0){b.sumG+=grr;b.cntG++;}
     if(!isNaN(htr)&&htr>0){b.htrVals.push(htr);}
+    if(!isNaN(rides24h)&&rides24h>0){b.cnt24h++;}
     const qty=(r.nest_quantity!=null&&r.nest_quantity!=='')?parseInt(r.nest_quantity):NaN;
     if(!isNaN(qty)) b.qty=qty;   // nest max_quantity — constant per nest
   });
-  return Object.values(m).map(b=>({...b,avgGRR:b.cntG?b.sumG/b.cntG:0,avgHTR:median(b.htrVals),captureRate24h:b.count?b.htrVals.length/b.count:null}));
+  return Object.values(m).map(b=>({...b,avgGRR:b.cntG?b.sumG/b.cntG:0,avgHTR:median(b.htrVals),captureRate24h:b.count?b.cnt24h/b.count:null}));
 }
 
 function sortDrillNests(key){
@@ -1738,7 +1751,7 @@ function drillNestTable(){
       <table style="width:100%;border-collapse:collapse;font-size:12px">
         <thead style="position:sticky;top:0;background:var(--s2);z-index:1">
           <tr style="text-align:left;color:var(--t3)">
-            <th style="padding:6px;text-align:right">#</th>${th('addr','Nest')}${th('count','Releases','right')}${th('avgGRR','Avg GR/RLS')}${th('avgHTR','Med HTR','right')}${th('captureRate24h','Capture','right')}${th('qty','Qty','right')}
+            <th style="padding:6px;text-align:right">#</th>${th('addr','Nest')}${th('count','Releases','right')}${th('avgGRR','Avg GR/RLS')}${th('avgHTR','Med HTR','right')}${th('captureRate24h','Capture (24h)','right')}${th('qty','Qty','right')}
           </tr>
         </thead>
         <tbody>${rows}</tbody>
@@ -3390,7 +3403,7 @@ function renderExecSummary(){
       ${kpi('Total Releases',fmtN(overall.count),relD,false,'')}
       ${kpi('Avg GR/RLS',fmt$(overall.avgGRR),grrD,false,'$')}
       ${kpi('Med HTR',fmtH(overall.avgHTR),htrD,true,'h')}
-      ${kpi('Ride Capture',overall.captureRate24h!=null?(overall.captureRate24h*100).toFixed(1)+'%':'—',capD,false,'%')}
+      ${kpi('Ride Capture (24h)',overall.captureRate24h!=null?(overall.captureRate24h*100).toFixed(1)+'%':'—',capD,false,'%')}
     </div>`;
   })();
 

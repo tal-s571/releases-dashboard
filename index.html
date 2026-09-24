@@ -352,6 +352,7 @@ function getPrevData() {
 function computeStats(data) {
   if(!data||!data.length) return null;
   let sumGRR=0,cntGRR=0,sumHTR=0,cntHTR=0,totalRev=0;
+  const htrVals=[];
   const byHood={},byHour={},byDay={},byType={},byNest={},byOperator={};
 
   function bucket(map,key){
@@ -363,7 +364,13 @@ function computeStats(data) {
     b.count++;
     b.totalRev+=grr||0;
     if(grr!=null&&grr>0){b.sumGRR+=grr;b.cntGRR++;(b.grrVals||(b.grrVals=[])).push(grr);}
-    if(htr!=null){b.sumHTR+=htr;b.cntHTR++;}
+    // htr (hours_to_ride) is already capped to 24h at the SQL level, so
+    // cntHTR/count here IS the ride-capture-rate-within-24h — see
+    // captureRate24h below. Using the median (not mean) for HTR itself:
+    // the mean is dragged around by whichever releases happen to sit near
+    // the 24h cutoff, which is exactly the instability this was built to
+    // avoid.
+    if(htr!=null){b.sumHTR+=htr;b.cntHTR++;(b.htrVals||(b.htrVals=[])).push(htr);}
   }
 
   for(const r of data){
@@ -378,7 +385,7 @@ function computeStats(data) {
 
     totalRev+=grr||0;
     if(grr!=null){sumGRR+=grr;cntGRR++;} // include $0 releases — they ARE zero-revenue events
-    if(htr!=null){sumHTR+=htr;cntHTR++;}
+    if(htr!=null){sumHTR+=htr;cntHTR++;htrVals.push(htr);}
 
     fill(byHood,hood,grr,htr);
     // per-hood extras: avg street vehicles & per-nest quantity
@@ -404,7 +411,7 @@ function computeStats(data) {
           id:opId,
           name:r.operator_name||r.operator_email||opId,
           email:r.operator_email||'',
-          count:0,sumGRR:0,cntGRR:0,sumHTR:0,cntHTR:0,totalRev:0,
+          count:0,sumGRR:0,cntGRR:0,sumHTR:0,cntHTR:0,totalRev:0,htrVals:[],
           hoodCounts:{}
         };
       }
@@ -412,7 +419,7 @@ function computeStats(data) {
       ob.count++;
       ob.totalRev+=grr||0;
       if(grr!=null&&grr>0){ob.sumGRR+=grr;ob.cntGRR++;}
-      if(htr!=null){ob.sumHTR+=htr;ob.cntHTR++;}
+      if(htr!=null){ob.sumHTR+=htr;ob.cntHTR++;ob.htrVals.push(htr);}
       ob.hoodCounts[hood]=(ob.hoodCounts[hood]||0)+1;
     }
   }
@@ -425,7 +432,11 @@ function computeStats(data) {
   function finalize(map){
     Object.values(map).forEach(b=>{
       b.avgGRR=b.cntGRR>0?b.sumGRR/b.cntGRR:0;
-      b.avgHTR=b.cntHTR>0?b.sumHTR/b.cntHTR:null;
+      // avgHTR is a MEDIAN of the 24h-capped values, not a mean — see the
+      // note in fill(). Kept under the same field name so every existing
+      // reader (tables, KPIs, insights) picks it up without further changes.
+      b.avgHTR=median(b.htrVals);
+      b.captureRate24h=b.count>0?b.cntHTR/b.count:null;
       b.medianGRR=median(b.grrVals);
     });
   }
@@ -438,14 +449,16 @@ function computeStats(data) {
   });
   Object.values(byOperator).forEach(ob=>{
     ob.avgGRR=ob.cntGRR>0?ob.sumGRR/ob.cntGRR:0;
-    ob.avgHTR=ob.cntHTR>0?ob.sumHTR/ob.cntHTR:null;
+    ob.avgHTR=median(ob.htrVals);
+    ob.captureRate24h=ob.count>0?ob.cntHTR/ob.count:null;
     ob.mainHood=Object.entries(ob.hoodCounts).sort((a,b)=>b[1]-a[1])[0]?.[0]||'—';
   });
 
   return {
     count:data.length, totalRev,
     avgGRR:cntGRR>0?sumGRR/cntGRR:0,
-    avgHTR:cntHTR>0?sumHTR/cntHTR:null,
+    avgHTR:median(htrVals),
+    captureRate24h:data.length>0?cntHTR/data.length:null,
     byHood,byHour,byDay,byType,byNest,byOperator
   };
 }
@@ -978,6 +991,8 @@ function renderKPIs(s,p){
   const cntDelta=p?`<div class="kpi-delta ${s.count>p.count?'up':s.count<p.count?'down':'flat'}">${s.count>p.count?'↑':'↓'} ${Math.abs(s.count-p.count)} vs prev week</div>`:'';
   const grrDelta=p?(()=>{const d=s.avgGRR-p.avgGRR;const cls=d>0?'up':d<0?'down':'flat';return `<div class="kpi-delta ${cls}">${d>0?'↑':'↓'} ${d>0?'+':''}$${Math.abs(d).toFixed(2)} vs prev week</div>`;})():'';
   const htrDelta=p&&s.avgHTR!=null&&p.avgHTR!=null?(()=>{const d=s.avgHTR-p.avgHTR;const cls=d<0?'up':d>0?'down':'flat';return `<div class="kpi-delta ${cls}">${d<0?'↑':'↓'} ${Math.abs(d).toFixed(1)}h vs prev week</div>`;})():'';
+  const captureCls=s.captureRate24h!=null?(s.captureRate24h>=0.85?'good':s.captureRate24h>=0.6?'warn':'bad'):'';
+  const captureDelta=p&&s.captureRate24h!=null&&p.captureRate24h!=null?(()=>{const d=(s.captureRate24h-p.captureRate24h)*100;const cls=d>0?'up':d<0?'down':'flat';return `<div class="kpi-delta ${cls}">${d>0?'↑':'↓'} ${Math.abs(d).toFixed(1)}pp vs prev week</div>`;})():'';
 
   // Always use week-level data for pie (not tab-filtered)
   const weekStats=computeStats(getWeekData())||s;
@@ -1013,10 +1028,16 @@ function renderKPIs(s,p){
       ${grrDelta}
     </div>
     <div class="kpi">
-      <div class="kpi-label">Avg HTR</div>
+      <div class="kpi-label">Med HTR</div>
       <div class="kpi-value${htrCls?' '+htrCls:''}">${fmtH(s.avgHTR)}</div>
-      <div class="kpi-sub">hours to first ride</div>
+      <div class="kpi-sub">median, among releases ridden within 24h</div>
       ${htrDelta}
+    </div>
+    <div class="kpi">
+      <div class="kpi-label">Ride Capture (24h)</div>
+      <div class="kpi-value${captureCls?' '+captureCls:''}">${s.captureRate24h!=null?(s.captureRate24h*100).toFixed(1)+'%':'—'}</div>
+      <div class="kpi-sub">releases ridden within 24h</div>
+      ${captureDelta}
     </div>
   </div>`;
 }
@@ -3345,7 +3366,7 @@ function renderExecSummary(){
       const d=delta!=null?(inv?-delta:delta):null;
       const good=d!=null&&d>0;
       const col=d==null?null:good?'#16A34A':'#DC2626';
-      const abs=d==null?null:(prefix==='$'?'$'+Math.abs(delta).toFixed(2):Math.abs(delta).toFixed(prefix==='h'?1:0)+(prefix==='h'?'h':''));
+      const abs=d==null?null:(prefix==='$'?'$'+Math.abs(delta).toFixed(2):prefix==='%'?Math.abs(delta).toFixed(1)+'pp':Math.abs(delta).toFixed(prefix==='h'?1:0)+(prefix==='h'?'h':''));
       return `<div style="padding:10px 16px;border-right:1px solid #E2E8F0">
         <div style="font-size:9.5px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#94A3B8;margin-bottom:4px">${label}</div>
         <div style="font-size:24px;font-weight:700;color:#0D1B3E;line-height:1;font-variant-numeric:tabular-nums">${val}</div>
@@ -3355,10 +3376,12 @@ function renderExecSummary(){
     const relD=overallPrev?overall.count-overallPrev.count:null;
     const grrD=overallPrev?overall.avgGRR-overallPrev.avgGRR:null;
     const htrD=overallPrev&&overall.avgHTR!=null&&overallPrev.avgHTR!=null?overall.avgHTR-overallPrev.avgHTR:null;
-    return `<div style="display:grid;grid-template-columns:1fr 1fr 1fr;border-bottom:1px solid #E2E8F0">
+    const capD=overallPrev&&overall.captureRate24h!=null&&overallPrev.captureRate24h!=null?(overall.captureRate24h-overallPrev.captureRate24h)*100:null;
+    return `<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;border-bottom:1px solid #E2E8F0">
       ${kpi('Total Releases',fmtN(overall.count),relD,false,'')}
       ${kpi('Avg GR/RLS',fmt$(overall.avgGRR),grrD,false,'$')}
-      ${kpi('Avg HTR',fmtH(overall.avgHTR),htrD,true,'h')}
+      ${kpi('Med HTR',fmtH(overall.avgHTR),htrD,true,'h')}
+      ${kpi('Ride Capture (24h)',overall.captureRate24h!=null?(overall.captureRate24h*100).toFixed(1)+'%':'—',capD,false,'%')}
     </div>`;
   })();
 

@@ -630,6 +630,11 @@ function csvBtn(filename){
 function fmt$(v){ return v==null?'—':'$'+v.toFixed(2); }
 function fmtH(v){ return v==null?'—':v.toFixed(1)+'h'; }
 function fmtN(v){ return v==null?'—':v.toLocaleString(); }
+function median(arr){
+  if(!arr||!arr.length) return null;
+  const s=[...arr].sort((a,b)=>a-b), m=Math.floor(s.length/2);
+  return s.length%2 ? s[m] : (s[m-1]+s[m])/2;
+}
 
 function rankClass(vals, val) {
   const sorted = [...vals].filter(v=>v>0).sort((a,b)=>a-b);
@@ -877,15 +882,15 @@ function renderCityComparison(data, prevData){
       const grr=parseFloat(r.gross_revenue_24h_usd);
       const htrRaw=(r.hours_to_ride!=null&&r.hours_to_ride!=='')?r.hours_to_ride:r.hours_to_first_ride;
       const htr=parseFloat(htrRaw);
-      if(!m[c]) m[c]={city:c,count:0,sumG:0,cntG:0,sumH:0,cntH:0,rev:0};
+      if(!m[c]) m[c]={city:c,count:0,sumG:0,cntG:0,htrVals:[],rev:0};
       const b=m[c]; b.count++;
       if(!isNaN(grr)){ b.rev+=grr; if(grr>0){b.sumG+=grr;b.cntG++;} }
-      if(!isNaN(htr)&&htr>0){ b.sumH+=htr;b.cntH++; }
+      if(!isNaN(htr)&&htr>0){ b.htrVals.push(htr); }
     });
     return m;
   };
   const cur=agg(data), prev=agg(prevData);
-  let cities=Object.values(cur).map(b=>({...b,avgGRR:b.cntG?b.sumG/b.cntG:0,avgHTR:b.cntH?b.sumH/b.cntH:null}))
+  let cities=Object.values(cur).map(b=>({...b,avgGRR:b.cntG?b.sumG/b.cntG:0,avgHTR:median(b.htrVals),captureRate24h:b.count?b.htrVals.length/b.count:null}))
     .sort((a,b)=>b.count-a.count);
   if(cities.length<2) return '';
   const totalRel=cities.reduce((s,c)=>s+c.count,0);
@@ -899,11 +904,11 @@ function renderCityComparison(data, prevData){
     const abs=fmt==='$'?'$'+Math.abs(d).toFixed(2):fmt==='h'?Math.abs(d).toFixed(1)+'h':fmtN(Math.round(Math.abs(d)));
     return `<span style="color:${col};font-weight:700;font-size:10.5px">${d>0?'▲ +':'▼ '}${abs}</span>`;
   };
-  const head=['#','City','Releases','Share',...(showWoW?['Δ WoW']:[]),'Avg GR/RLS',...(showWoW?['Δ WoW']:[]),'Avg HTR',...(showWoW?['Δ WoW']:[])]
+  const head=['#','City','Releases','Share',...(showWoW?['Δ WoW']:[]),'Avg GR/RLS',...(showWoW?['Δ WoW']:[]),'Med HTR',...(showWoW?['Δ WoW']:[]),'Capture 24h']
     .map(h=>`<th style="padding:6px 10px;text-align:left;font-size:9px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--t3);white-space:nowrap">${h}</th>`).join('');
   const rows=cities.map((c,i)=>{
     const p=prev[c.city];
-    const pv=p?{count:p.count,avgGRR:p.cntG?p.sumG/p.cntG:0,avgHTR:p.cntH?p.sumH/p.cntH:null}:null;
+    const pv=p?{count:p.count,avgGRR:p.cntG?p.sumG/p.cntG:0,avgHTR:median(p.htrVals),captureRate24h:p.count?p.htrVals.length/p.count:null}:null;
     const share=(c.count/totalRel*100).toFixed(0);
     const bw=Math.round((c.count/maxRel)*70);
     return `<tr onclick="selectCity('${c.city.replace(/'/g,"\\'")}')" style="cursor:pointer;border-bottom:1px solid var(--border)" title="Open ${c.city}'s dashboard">
@@ -916,6 +921,7 @@ function renderCityComparison(data, prevData){
       ${showWoW?`<td style="padding:6px 10px">${wow(c.avgGRR,pv&&pv.avgGRR,'$',false)}</td>`:''}
       <td style="padding:6px 10px;color:var(--t2);font-variant-numeric:tabular-nums">${fmtH(c.avgHTR)}</td>
       ${showWoW?`<td style="padding:6px 10px">${wow(c.avgHTR,pv&&pv.avgHTR,'h',true)}</td>`:''}
+      <td style="padding:6px 10px;color:var(--t2);font-variant-numeric:tabular-nums">${c.captureRate24h!=null?(c.captureRate24h*100).toFixed(0)+'%':'—'}</td>
     </tr>`;
   }).join('');
   return `<div class="panel" style="margin-bottom:18px">
@@ -1141,9 +1147,10 @@ function renderTable(stats, prevStats){
   const fmtMoney=v=>'$'+Math.abs(v).toFixed(2);
   const fmtHr=v=>Math.abs(v).toFixed(1)+'h';
   const fmtDec=v=>Math.abs(v).toFixed(1);
+  const fmtPct=v=>(Math.abs(v)*100).toFixed(1)+'pp';
   const WOW_COLS={
-    count:{fmt:fmtInt,dir:1}, avgGRR:{fmt:fmtMoney,dir:1}, medianGRR:{fmt:fmtMoney,dir:1},
-    totalRev:{fmt:fmtMoney,dir:1}, avgHTR:{fmt:fmtHr,dir:-1},
+    count:{fmt:fmtInt,dir:1}, avgGRR:{fmt:fmtMoney,dir:1},
+    totalRev:{fmt:fmtMoney,dir:1}, avgHTR:{fmt:fmtHr,dir:-1}, captureRate24h:{fmt:fmtPct,dir:1},
     avgQtyPerNest:{fmt:fmtDec,dir:0}, avgVeh:{fmt:fmtDec,dir:0}
   };
   function wowSub(key,cur,prev){
@@ -1163,9 +1170,9 @@ function renderTable(stats, prevStats){
     {key:'name',   label:isNest?'Nest':'Neighborhood', sortable:false},
     {key:'count',  label:'Releases'},
     {key:'avgGRR', label:'Avg GR/RLS'},
-    {key:'medianGRR', label:'Med GR/RLS'},
     {key:'totalRev',label:'Total Rev'},
-    {key:'avgHTR', label:'Avg HTR'},
+    {key:'avgHTR', label:'Med HTR'},
+    {key:'captureRate24h', label:'Capture 24h'},
   ];
   if(!isNest){ cols.push({key:'avgQtyPerNest',label:'Qty/Nest'}); cols.push({key:'avgVeh',label:'Nest Veh'}); }
   if(isNest){ cols.push({key:'qty',label:'Qty'}); cols.push({key:'_nestid',label:'Nest ID',sortable:false}); }
@@ -1196,9 +1203,9 @@ function renderTable(stats, prevStats){
       </td>
       <td>${fmtN(row.count)}${wowSub('count',row.count,prevRow)}</td>
       <td>${rankPill(row.avgGRR)}${wowSub('avgGRR',row.avgGRR,prevRow)}</td>
-      <td style="color:var(--t2)">${row.medianGRR!=null?fmt$(row.medianGRR):'—'}${wowSub('medianGRR',row.medianGRR,prevRow)}</td>
       <td>${fmt$(row.totalRev)}${wowSub('totalRev',row.totalRev,prevRow)}</td>
       <td>${fmtH(row.avgHTR)}${wowSub('avgHTR',row.avgHTR,prevRow)}</td>
+      <td>${row.captureRate24h!=null?(row.captureRate24h*100).toFixed(0)+'%':'—'}${wowSub('captureRate24h',row.captureRate24h,prevRow)}</td>
       ${!isNest?`<td>${row.avgQtyPerNest!=null?row.avgQtyPerNest.toFixed(1):'—'}${row.nestCount?`<span style="color:var(--t3);font-size:10px"> · ${row.nestCount}n</span>`:''}${wowSub('avgQtyPerNest',row.avgQtyPerNest,prevRow)}</td><td>${row.avgVeh!=null?row.avgVeh.toFixed(1):'—'}${wowSub('avgVeh',row.avgVeh,prevRow)}</td>`:''}
       ${nestIdCell}
     </tr>`;
@@ -1235,7 +1242,7 @@ function renderOperatorTable(stats, prevStats){
     return `<span class="pill ${cls}">${fmt$(v)}</span>`;
   }
 
-  const ths=`<th>Operator</th><th>Releases</th><th>Avg GR/RLS</th><th>Main Neighborhood</th><th>Avg HTR</th>`
+  const ths=`<th>Operator</th><th>Releases</th><th>Avg GR/RLS</th><th>Main Neighborhood</th><th>Med HTR</th><th>Capture 24h</th>`
     +(showDelta?`<th>Δ Releases</th><th>Δ GR/RLS</th>`:'');
 
   const trs=rows.map(op=>{
@@ -1259,6 +1266,7 @@ function renderOperatorTable(stats, prevStats){
       <td>${rankPill(op.avgGRR)}</td>
       <td style="font-size:12px;color:var(--t2)">${op.mainHood}</td>
       <td>${fmtH(op.avgHTR)}</td>
+      <td>${op.captureRate24h!=null?(op.captureRate24h*100).toFixed(0)+'%':'—'}</td>
       ${deltaCells}
     </tr>`;
   }).join('');
@@ -1682,14 +1690,14 @@ function drillNestData(){
     const grr=parseFloat(r.gross_revenue_24h_usd);
     const htrRaw=(r.hours_to_ride!=null&&r.hours_to_ride!=='')?r.hours_to_ride:r.hours_to_first_ride;
     const htr=parseFloat(htrRaw);
-    if(!m[key]) m[key]={id:r.nest_id||'',addr:r.nest_address||r.nest_id||key,count:0,sumG:0,cntG:0,sumH:0,cntH:0,qty:null};
+    if(!m[key]) m[key]={id:r.nest_id||'',addr:r.nest_address||r.nest_id||key,count:0,sumG:0,cntG:0,htrVals:[],qty:null};
     const b=m[key]; b.count++;
     if(!isNaN(grr)&&grr>0){b.sumG+=grr;b.cntG++;}
-    if(!isNaN(htr)&&htr>0){b.sumH+=htr;b.cntH++;}
+    if(!isNaN(htr)&&htr>0){b.htrVals.push(htr);}
     const qty=(r.nest_quantity!=null&&r.nest_quantity!=='')?parseInt(r.nest_quantity):NaN;
     if(!isNaN(qty)) b.qty=qty;   // nest max_quantity — constant per nest
   });
-  return Object.values(m).map(b=>({...b,avgGRR:b.cntG?b.sumG/b.cntG:0,avgHTR:b.cntH?b.sumH/b.cntH:null}));
+  return Object.values(m).map(b=>({...b,avgGRR:b.cntG?b.sumG/b.cntG:0,avgHTR:median(b.htrVals),captureRate24h:b.count?b.htrVals.length/b.count:null}));
 }
 
 function sortDrillNests(key){
@@ -1722,6 +1730,7 @@ function drillNestTable(){
     <td style="text-align:right">${fmtN(n.count)}</td>
     <td>${pill(n.avgGRR)}</td>
     <td style="text-align:right;color:var(--t2)">${n.avgHTR!=null?n.avgHTR.toFixed(1)+'h':'—'}</td>
+    <td style="text-align:right;color:var(--t2)">${n.captureRate24h!=null?(n.captureRate24h*100).toFixed(0)+'%':'—'}</td>
     <td style="text-align:right;font-weight:700;color:var(--t1)">${n.qty!=null?n.qty:'—'}</td>
   </tr>`).join('');
   return `<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px"><span style="font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--t3)">Nests in this neighborhood — ${nests.length} · click a column to sort</span>${csvBtn('nests-'+(_drillHood||'area').replace(/[^a-z0-9]+/gi,'-'))}</div>
@@ -1729,7 +1738,7 @@ function drillNestTable(){
       <table style="width:100%;border-collapse:collapse;font-size:12px">
         <thead style="position:sticky;top:0;background:var(--s2);z-index:1">
           <tr style="text-align:left;color:var(--t3)">
-            <th style="padding:6px;text-align:right">#</th>${th('addr','Nest')}${th('count','Releases','right')}${th('avgGRR','Avg GR/RLS')}${th('avgHTR','Avg HTR','right')}${th('qty','Qty','right')}
+            <th style="padding:6px;text-align:right">#</th>${th('addr','Nest')}${th('count','Releases','right')}${th('avgGRR','Avg GR/RLS')}${th('avgHTR','Med HTR','right')}${th('captureRate24h','Capture 24h','right')}${th('qty','Qty','right')}
           </tr>
         </thead>
         <tbody>${rows}</tbody>

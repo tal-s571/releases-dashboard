@@ -3226,10 +3226,10 @@ function renderExecSummary(){
   // ── helpers ──
   function wow(d,inv,fmt,pct){
     if(d==null) return `<span style="color:#CBD5E1;font-size:10.5px">—</span>`;
-    if(Math.abs(d)<(fmt==='n'?0.5:fmt==='h'?0.05:0.005)) return `<span style="color:#94A3B8;font-weight:700;font-size:10.5px">▬ 0</span>`;
+    if(Math.abs(d)<(fmt==='n'?0.5:fmt==='h'?0.05:fmt==='%'?0.5:0.005)) return `<span style="color:#94A3B8;font-weight:700;font-size:10.5px">▬ 0</span>`;
     const good=inv?d<0:d>0;
     const col=good?'#16A34A':'#DC2626';
-    const abs=fmt==='$'?'$'+Math.abs(d).toFixed(2):fmt==='h'?Math.abs(d).toFixed(1)+'h':fmtN(Math.round(Math.abs(d)));
+    const abs=fmt==='$'?'$'+Math.abs(d).toFixed(2):fmt==='h'?Math.abs(d).toFixed(1)+'h':fmt==='%'?Math.abs(d).toFixed(1)+'pp':fmtN(Math.round(Math.abs(d)));
     const pctTxt=(pct!=null&&isFinite(pct))?` <span style="opacity:.8;font-weight:600">(${pct>0?'+':''}${pct.toFixed(0)}%)</span>`:'';
     return `<span style="color:${col};font-weight:700;font-size:10.5px">${d>0?'▲ +':'▼ '}${abs}${pctTxt}</span>`;
   }
@@ -3319,17 +3319,25 @@ function renderExecSummary(){
     if(val!=null&&restVal!=null) lines.push(`<div style="font-size:9px;margin-top:1px;white-space:nowrap"><span style="color:#94A3B8">rest:</span> ${wow(val-restVal,inv,fmtCode,pctOf(val-restVal,restVal))}</div>`);
     return lines.join('');
   };
+  const unfulfilledCaptureCellHtml=(val,prevVal,restVal)=>{
+    const pct=v=>v!=null?(v*100).toFixed(0)+'%':'—';
+    const lines=[`<div style="font-weight:700;color:#0D1B3E">${pct(val)}</div>`];
+    if(val!=null&&prevVal!=null) lines.push(`<div style="font-size:9px;margin-top:1px;white-space:nowrap"><span style="color:#94A3B8">wk:</span> ${wow((val-prevVal)*100,false,'%',null)}</div>`);
+    if(val!=null&&restVal!=null) lines.push(`<div style="font-size:9px;margin-top:1px;white-space:nowrap"><span style="color:#94A3B8">rest:</span> ${wow((val-restVal)*100,false,'%',null)}</div>`);
+    return lines.join('');
+  };
   const unfulfilledTableHtml=`
     <div style="max-width:33%;overflow-x:auto">
     <table style="width:auto;border-collapse:collapse;font-size:12px">
       <thead><tr style="background:#F8FAFC;border-bottom:2px solid #E2E8F0">
-        ${['Nest','Releases','Avg GR/RLS','Med HTR'].map(h=>`<th style="padding:4px 8px;text-align:left;font-size:8.5px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:#94A3B8;white-space:nowrap">${h}</th>`).join('')}
+        ${['Nest','Releases','Avg GR/RLS','Med HTR','Capture (24h)'].map(h=>`<th style="padding:4px 8px;text-align:left;font-size:8.5px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:#94A3B8;white-space:nowrap">${h}</th>`).join('')}
       </tr></thead>
       <tbody>${unfulfilledRows.map(n=>`<tr style="border-bottom:1px solid #F1F5F9">
         <td style="padding:5px 8px;font-size:11px;color:#0D1B3E">${n.address}</td>
         <td style="padding:5px 8px;font-weight:700;color:#0D1B3E">${fmtN(n.stats?n.stats.count:0)}</td>
         <td style="padding:5px 8px;font-weight:700;color:#29C6F0">${n.stats?fmt$(n.stats.avgGRR):'—'}</td>
         <td style="padding:5px 8px;color:#475569">${n.stats?fmtH(n.stats.avgHTR):'—'}</td>
+        <td style="padding:5px 8px;color:#475569">${n.stats&&n.stats.captureRate24h!=null?(n.stats.captureRate24h*100).toFixed(0)+'%':'—'}</td>
       </tr>`).join('')}
       <tr style="border-top:2px solid #E2E8F0;background:#F8FAFC">
         <td style="padding:5px 8px;font-weight:700;color:#0D1B3E">Summary</td>
@@ -3339,6 +3347,7 @@ function renderExecSummary(){
         </td>
         <td style="padding:5px 8px">${unfulfilledSummaryCellHtml(unfulfilledSummaryStats?unfulfilledSummaryStats.avgGRR:null,fmt$,unfulfilledSummaryPrevStats?unfulfilledSummaryPrevStats.avgGRR:null,unfulfilledRestStats?unfulfilledRestStats.avgGRR:null,'$',false)}</td>
         <td style="padding:5px 8px">${unfulfilledSummaryCellHtml(unfulfilledSummaryStats?unfulfilledSummaryStats.avgHTR:null,fmtH,unfulfilledSummaryPrevStats?unfulfilledSummaryPrevStats.avgHTR:null,unfulfilledRestStats?unfulfilledRestStats.avgHTR:null,'h',true)}</td>
+        <td style="padding:5px 8px">${unfulfilledCaptureCellHtml(unfulfilledSummaryStats?unfulfilledSummaryStats.captureRate24h:null,unfulfilledSummaryPrevStats?unfulfilledSummaryPrevStats.captureRate24h:null,unfulfilledRestStats?unfulfilledRestStats.captureRate24h:null)}</td>
       </tr></tbody>
     </table></div>`;
 
@@ -3348,13 +3357,14 @@ function renderExecSummary(){
     <div style="overflow-x:auto">
     <table style="width:100%;border-collapse:collapse;font-size:12px;font-variant-numeric:tabular-nums">
       <thead><tr style="background:#F8FAFC;border-bottom:2px solid #E2E8F0">
-        ${['Type','Releases','Δ WoW','Share','GR/RLS','Δ WoW','HTR','Δ WoW'].map((h,i)=>`<th style="padding:3px ${i===0?8:5}px;text-align:left;font-size:8.5px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:#94A3B8;white-space:nowrap">${h}</th>`).join('')}
+        ${['Type','Releases','Δ WoW','Share','GR/RLS','Δ WoW','Med HTR','Δ WoW','Capture (24h)','Δ WoW'].map((h,i)=>`<th style="padding:3px ${i===0?8:5}px;text-align:left;font-size:8.5px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:#94A3B8;white-space:nowrap">${h}</th>`).join('')}
       </tr></thead>
       <tbody>${typeRows.map(({label,d,p,isMain})=>{
         const pct=(d.count/overall.count*100).toFixed(0);
         const relD=p?d.count-p.count:null;
         const gD=p?d.avgGRR-p.avgGRR:null;
         const hD=p&&d.avgHTR!=null&&p.avgHTR!=null?d.avgHTR-p.avgHTR:null;
+        const cD=p&&d.captureRate24h!=null&&p.captureRate24h!=null?d.captureRate24h-p.captureRate24h:null;
         return `<tr style="border-bottom:1px solid #F1F5F9;${isMain?'':'opacity:0.72'}">
           <td style="padding:3px 8px;font-weight:${isMain?700:500};color:#0D1B3E;white-space:nowrap">${label}</td>
           <td style="padding:3px 5px;color:#334155;font-weight:600">${fmtN(d.count)}</td>
@@ -3364,6 +3374,8 @@ function renderExecSummary(){
           <td style="padding:3px 5px;white-space:nowrap">${wow(gD,false,'$',pctOf(gD,p&&p.avgGRR))}</td>
           <td style="padding:3px 5px;color:#475569">${fmtH(d.avgHTR)}</td>
           <td style="padding:3px 5px;white-space:nowrap">${wow(hD,true,'h',pctOf(hD,p&&p.avgHTR))}</td>
+          <td style="padding:3px 5px;color:#475569">${d.captureRate24h!=null?(d.captureRate24h*100).toFixed(0)+'%':'—'}</td>
+          <td style="padding:3px 5px;white-space:nowrap">${wow(cD!=null?cD*100:null,false,'%',null)}</td>
         </tr>`;
       }).join('')}
       <tr style="border-top:2px solid #E2E8F0;background:#F8FAFC">
@@ -3375,6 +3387,8 @@ function renderExecSummary(){
         <td style="padding:4px 5px;white-space:nowrap">${wow(overallPrev?overall.avgGRR-overallPrev.avgGRR:null,false,'$',overallPrev?pctOf(overall.avgGRR-overallPrev.avgGRR,overallPrev.avgGRR):null)}</td>
         <td style="padding:4px 5px;color:#475569">${fmtH(overall.avgHTR)}</td>
         <td style="padding:4px 5px;white-space:nowrap">${wow(overallPrev&&overall.avgHTR!=null&&overallPrev.avgHTR!=null?overall.avgHTR-overallPrev.avgHTR:null,true,'h',(overallPrev&&overall.avgHTR!=null&&overallPrev.avgHTR!=null)?pctOf(overall.avgHTR-overallPrev.avgHTR,overallPrev.avgHTR):null)}</td>
+        <td style="padding:4px 5px;color:#475569">${overall.captureRate24h!=null?(overall.captureRate24h*100).toFixed(0)+'%':'—'}</td>
+        <td style="padding:4px 5px;white-space:nowrap">${wow(overallPrev&&overall.captureRate24h!=null&&overallPrev.captureRate24h!=null?(overall.captureRate24h-overallPrev.captureRate24h)*100:null,false,'%',null)}</td>
       </tr></tbody>
     </table></div>`;
 
@@ -3383,12 +3397,13 @@ function renderExecSummary(){
   const hoodTableHtml=`
     <table style="width:100%;border-collapse:collapse;font-size:12px;font-variant-numeric:tabular-nums">
       <thead><tr style="background:#F8FAFC;border-bottom:2px solid #E2E8F0">
-        ${['#','Neighborhood','Releases','Δ WoW','GR/RLS','Δ WoW','HTR'].map(h=>`<th style="padding:4px 8px;text-align:left;font-size:8.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#94A3B8">${h}</th>`).join('')}
+        ${['#','Neighborhood','Releases','Δ WoW','GR/RLS','Δ WoW','Med HTR','Capture (24h)','Δ WoW'].map(h=>`<th style="padding:4px 8px;text-align:left;font-size:8.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#94A3B8">${h}</th>`).join('')}
       </tr></thead>
       <tbody>${topHoods.map((h,i)=>{
         const ph=prevByHood[h.name];
         const gD=ph?h.avgGRR-ph.avgGRR:null;
         const relD=ph?h.count-ph.count:null;
+        const cD=ph&&h.captureRate24h!=null&&ph.captureRate24h!=null?(h.captureRate24h-ph.captureRate24h)*100:null;
         const bw=Math.round((h.count/maxHoodCount)*46);
         return `<tr style="border-bottom:1px solid #F1F5F9">
           <td style="padding:4px 8px;color:#94A3B8;font-weight:700">${i+1}</td>
@@ -3398,6 +3413,8 @@ function renderExecSummary(){
           <td style="padding:4px 8px;font-weight:700;color:#29C6F0">${fmt$(h.avgGRR)}</td>
           <td style="padding:4px 8px">${wow(gD,false,'$',pctOf(gD,ph&&ph.avgGRR))}</td>
           <td style="padding:4px 8px;color:#475569">${fmtH(h.avgHTR)}</td>
+          <td style="padding:4px 8px;color:#475569">${h.captureRate24h!=null?(h.captureRate24h*100).toFixed(0)+'%':'—'}</td>
+          <td style="padding:4px 8px">${wow(cD,false,'%',null)}</td>
         </tr>`;
       }).join('')}</tbody>
     </table>`;

@@ -3297,30 +3297,30 @@ function renderExecSummary(){
       <div style="padding:10px 16px;display:flex;align-items:center;color:#64748B;font-size:11px">vs. ${fmtN(restStats?restStats.count:0)} releases from existing nests${metroStatsPrev?` · ${fmtN(metroStatsPrev.count)} metrofun releases last week`:''}</div>
     </div>`:'';
 
-  // ── unfulfilled demand nests — 4 named nests, one row each, each vs its
-  // own last week AND vs every other nest this week ──
+  // ── unfulfilled demand nests — 4 named nests. Each nest gets a plain row
+  // (no comparisons, keeps it compact); a summary row at the end combines
+  // all 4 and carries the vs-last-week / vs-rest-of-nests comparison ──
   const UNFULFILLED_NEST_IDS=['f36a9c96-7fb9-4d32-bbe7-cb87cdded07b','c43c80e3-1187-453f-9b83-c632787c302c','f0619f0f-14db-4bad-b2d5-10f0ebbc628a','c25b4319-71ed-4d8b-a940-141c15b38f85'];
   const unfulfilledRestRows=allWeekData.filter(r=>!UNFULFILLED_NEST_IDS.includes(r.nest_id));
   const unfulfilledRestStats=unfulfilledRestRows.length?computeStats(unfulfilledRestRows):null;
+  const unfulfilledAllRows=allWeekData.filter(r=>UNFULFILLED_NEST_IDS.includes(r.nest_id));
+  const unfulfilledAllPrevRows=prevWeekData?prevWeekData.filter(r=>UNFULFILLED_NEST_IDS.includes(r.nest_id)):null;
+  const unfulfilledSummaryStats=unfulfilledAllRows.length?computeStats(unfulfilledAllRows):null;
+  const unfulfilledSummaryPrevStats=unfulfilledAllPrevRows&&unfulfilledAllPrevRows.length?computeStats(unfulfilledAllPrevRows):null;
   const unfulfilledRows=UNFULFILLED_NEST_IDS.map(nid=>{
     const curRows=allWeekData.filter(r=>r.nest_id===nid);
-    const prevRows=prevWeekData?prevWeekData.filter(r=>r.nest_id===nid):null;
     const anyRow=curRows[0]||allWeekData.find(r=>r.nest_id===nid)||rawData.find(r=>r.nest_id===nid);
     const address=anyRow?(anyRow.nest_address||nid):nid;
-    return {
-      nid, address,
-      stats:curRows.length?computeStats(curRows):null,
-      prevStats:prevRows&&prevRows.length?computeStats(prevRows):null
-    };
+    return { nid, address, stats:curRows.length?computeStats(curRows):null };
   });
-  const unfulfilledCellHtml=(val,fmtFn,prevVal,restVal,fmtCode,inv)=>{
+  const unfulfilledSummaryCellHtml=(val,fmtFn,prevVal,restVal,fmtCode,inv)=>{
     const lines=[`<div style="font-weight:700;color:#0D1B3E">${val!=null?fmtFn(val):'—'}</div>`];
     if(val!=null&&prevVal!=null) lines.push(`<div style="font-size:9px;margin-top:1px;white-space:nowrap"><span style="color:#94A3B8">wk:</span> ${wow(val-prevVal,inv,fmtCode,pctOf(val-prevVal,prevVal))}</div>`);
     if(val!=null&&restVal!=null) lines.push(`<div style="font-size:9px;margin-top:1px;white-space:nowrap"><span style="color:#94A3B8">rest:</span> ${wow(val-restVal,inv,fmtCode,pctOf(val-restVal,restVal))}</div>`);
     return lines.join('');
   };
   const unfulfilledTableHtml=`
-    <div style="overflow-x:auto">
+    <div style="max-width:33%">
     <table style="width:100%;border-collapse:collapse;font-size:12px">
       <thead><tr style="background:#F8FAFC;border-bottom:2px solid #E2E8F0">
         ${['Nest','Releases','Avg GR/RLS','Med HTR'].map(h=>`<th style="padding:4px 8px;text-align:left;font-size:8.5px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:#94A3B8;white-space:nowrap">${h}</th>`).join('')}
@@ -3328,9 +3328,15 @@ function renderExecSummary(){
       <tbody>${unfulfilledRows.map(n=>`<tr style="border-bottom:1px solid #F1F5F9">
         <td style="padding:5px 8px;font-size:11px;color:#0D1B3E">${n.address}</td>
         <td style="padding:5px 8px;font-weight:700;color:#0D1B3E">${fmtN(n.stats?n.stats.count:0)}</td>
-        <td style="padding:5px 8px">${unfulfilledCellHtml(n.stats?n.stats.avgGRR:null,fmt$,n.prevStats?n.prevStats.avgGRR:null,unfulfilledRestStats?unfulfilledRestStats.avgGRR:null,'$',false)}</td>
-        <td style="padding:5px 8px">${unfulfilledCellHtml(n.stats?n.stats.avgHTR:null,fmtH,n.prevStats?n.prevStats.avgHTR:null,unfulfilledRestStats?unfulfilledRestStats.avgHTR:null,'h',true)}</td>
-      </tr>`).join('')}</tbody>
+        <td style="padding:5px 8px;font-weight:700;color:#29C6F0">${n.stats?fmt$(n.stats.avgGRR):'—'}</td>
+        <td style="padding:5px 8px;color:#475569">${n.stats?fmtH(n.stats.avgHTR):'—'}</td>
+      </tr>`).join('')}
+      <tr style="border-top:2px solid #E2E8F0;background:#F8FAFC">
+        <td style="padding:5px 8px;font-weight:700;color:#0D1B3E">All 4 nests</td>
+        <td style="padding:5px 8px;font-weight:700;color:#0D1B3E">${fmtN(unfulfilledSummaryStats?unfulfilledSummaryStats.count:0)}</td>
+        <td style="padding:5px 8px">${unfulfilledSummaryCellHtml(unfulfilledSummaryStats?unfulfilledSummaryStats.avgGRR:null,fmt$,unfulfilledSummaryPrevStats?unfulfilledSummaryPrevStats.avgGRR:null,unfulfilledRestStats?unfulfilledRestStats.avgGRR:null,'$',false)}</td>
+        <td style="padding:5px 8px">${unfulfilledSummaryCellHtml(unfulfilledSummaryStats?unfulfilledSummaryStats.avgHTR:null,fmtH,unfulfilledSummaryPrevStats?unfulfilledSummaryPrevStats.avgHTR:null,unfulfilledRestStats?unfulfilledRestStats.avgHTR:null,'h',true)}</td>
+      </tr></tbody>
     </table></div>`;
 
   // ── type table — releases / GR/RLS / HTR, each with WoW ──

@@ -3332,7 +3332,7 @@ function renderExecSummary(){
         <td style="padding:5px 8px;color:#475569">${n.stats?fmtH(n.stats.avgHTR):'—'}</td>
       </tr>`).join('')}
       <tr style="border-top:2px solid #E2E8F0;background:#F8FAFC">
-        <td style="padding:5px 8px;font-weight:700;color:#0D1B3E">All 4 nests</td>
+        <td style="padding:5px 8px;font-weight:700;color:#0D1B3E">Summary</td>
         <td style="padding:5px 8px;font-weight:700;color:#0D1B3E">${fmtN(unfulfilledSummaryStats?unfulfilledSummaryStats.count:0)}</td>
         <td style="padding:5px 8px">${unfulfilledSummaryCellHtml(unfulfilledSummaryStats?unfulfilledSummaryStats.avgGRR:null,fmt$,unfulfilledSummaryPrevStats?unfulfilledSummaryPrevStats.avgGRR:null,unfulfilledRestStats?unfulfilledRestStats.avgGRR:null,'$',false)}</td>
         <td style="padding:5px 8px">${unfulfilledSummaryCellHtml(unfulfilledSummaryStats?unfulfilledSummaryStats.avgHTR:null,fmtH,unfulfilledSummaryPrevStats?unfulfilledSummaryPrevStats.avgHTR:null,unfulfilledRestStats?unfulfilledRestStats.avgHTR:null,'h',true)}</td>

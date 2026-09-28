@@ -3333,7 +3333,10 @@ function renderExecSummary(){
       </tr>`).join('')}
       <tr style="border-top:2px solid #E2E8F0;background:#F8FAFC">
         <td style="padding:5px 8px;font-weight:700;color:#0D1B3E">Summary</td>
-        <td style="padding:5px 8px;font-weight:700;color:#0D1B3E">${fmtN(unfulfilledSummaryStats?unfulfilledSummaryStats.count:0)}</td>
+        <td style="padding:5px 8px">
+          <div style="font-weight:700;color:#0D1B3E">${fmtN(unfulfilledSummaryStats?unfulfilledSummaryStats.count:0)}</div>
+          ${unfulfilledSummaryPrevStats?`<div style="font-size:9px;margin-top:1px;white-space:nowrap"><span style="color:#94A3B8">wk:</span> ${wow((unfulfilledSummaryStats?unfulfilledSummaryStats.count:0)-unfulfilledSummaryPrevStats.count,false,'n',pctOf((unfulfilledSummaryStats?unfulfilledSummaryStats.count:0)-unfulfilledSummaryPrevStats.count,unfulfilledSummaryPrevStats.count))}</div>`:''}
+        </td>
         <td style="padding:5px 8px">${unfulfilledSummaryCellHtml(unfulfilledSummaryStats?unfulfilledSummaryStats.avgGRR:null,fmt$,unfulfilledSummaryPrevStats?unfulfilledSummaryPrevStats.avgGRR:null,unfulfilledRestStats?unfulfilledRestStats.avgGRR:null,'$',false)}</td>
         <td style="padding:5px 8px">${unfulfilledSummaryCellHtml(unfulfilledSummaryStats?unfulfilledSummaryStats.avgHTR:null,fmtH,unfulfilledSummaryPrevStats?unfulfilledSummaryPrevStats.avgHTR:null,unfulfilledRestStats?unfulfilledRestStats.avgHTR:null,'h',true)}</td>
       </tr></tbody>

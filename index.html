@@ -3320,8 +3320,8 @@ function renderExecSummary(){
     return lines.join('');
   };
   const unfulfilledTableHtml=`
-    <div style="max-width:33%">
-    <table style="width:100%;border-collapse:collapse;font-size:12px">
+    <div style="max-width:33%;overflow-x:auto">
+    <table style="width:auto;border-collapse:collapse;font-size:12px">
       <thead><tr style="background:#F8FAFC;border-bottom:2px solid #E2E8F0">
         ${['Nest','Releases','Avg GR/RLS','Med HTR'].map(h=>`<th style="padding:4px 8px;text-align:left;font-size:8.5px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:#94A3B8;white-space:nowrap">${h}</th>`).join('')}
       </tr></thead>

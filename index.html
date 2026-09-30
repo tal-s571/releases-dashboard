@@ -363,7 +363,12 @@ function computeStats(data) {
     const b=bucket(map,key);
     b.count++;
     b.totalRev+=grr||0;
-    if(grr!=null&&grr>0){b.sumGRR+=grr;b.cntGRR++;(b.grrVals||(b.grrVals=[])).push(grr);}
+    // Include $0 releases in every bucket's average, matching the overall
+    // total below (a $0 release is a real event, not missing data) -- this
+    // used to be grr>0, which quietly excluded them ONLY from per-bucket
+    // averages (by type/hood/nest/day/hour) while the overall total already
+    // included them, inflating every sub-breakdown relative to the total.
+    if(grr!=null){b.sumGRR+=grr;b.cntGRR++;(b.grrVals||(b.grrVals=[])).push(grr);}
     // htr (hours_to_ride) now uses a week-scoped cutoff (see the SQL header),
     // not a flat 24h window, so it can no longer double as the 24h capture
     // rate — that's tracked separately via captured24h (rides_24h > 0) below.
@@ -426,7 +431,7 @@ function computeStats(data) {
       const ob=byOperator[opId];
       ob.count++;
       ob.totalRev+=grr||0;
-      if(grr!=null&&grr>0){ob.sumGRR+=grr;ob.cntGRR++;}
+      if(grr!=null){ob.sumGRR+=grr;ob.cntGRR++;}
       if(htr!=null){ob.sumHTR+=htr;ob.cntHTR++;ob.htrVals.push(htr);}
       if(captured24h) ob.cnt24h++;
       ob.hoodCounts[hood]=(ob.hoodCounts[hood]||0)+1;
@@ -574,7 +579,7 @@ function wwSplit(data){
     const b=WEEKEND_DAYS.includes(day)?g.weekend:g.weekday;
     const grr=n(r.gross_revenue_24h_usd), htr=n(r.hours_to_ride);
     b.c++; b.rev+=grr||0;
-    if(grr!=null&&grr>0){b.sG+=grr;b.cG++;}
+    if(grr!=null){b.sG+=grr;b.cG++;}
     if(htr!=null){b.sH+=htr;b.cH++;}
   });
   const stat=b=>({rel:b.c,avgGRR:b.cG?b.sG/b.cG:0,avgHTR:b.cH?b.sH/b.cH:null,revPerDay:b.rev});
@@ -894,7 +899,7 @@ function renderCityComparison(data, prevData){
       const rides24h=parseFloat(r.rides_24h);
       if(!m[c]) m[c]={city:c,count:0,sumG:0,cntG:0,htrVals:[],cnt24h:0,rev:0};
       const b=m[c]; b.count++;
-      if(!isNaN(grr)){ b.rev+=grr; if(grr>0){b.sumG+=grr;b.cntG++;} }
+      if(!isNaN(grr)){ b.rev+=grr; b.sumG+=grr; b.cntG++; }
       if(!isNaN(htr)&&htr>0){ b.htrVals.push(htr); }
       if(!isNaN(rides24h)&&rides24h>0){ b.cnt24h++; }
     });
@@ -1402,7 +1407,7 @@ function dailyAgg(data){
     const grr=n(r.gross_revenue_24h_usd);
     if(!byDate[d]) byDate[d]={date:d,counts:{},total:0,sumG:0,cntG:0};
     const b=byDate[d]; b.counts[t]=(b.counts[t]||0)+1; b.total++;
-    if(grr!=null&&grr>0){ b.sumG+=grr; b.cntG++; }
+    if(grr!=null){ b.sumG+=grr; b.cntG++; }
   });
   return Object.values(byDate).sort((a,b)=>{const pa=parseDate(a.date),pb=parseDate(b.date);return (pa&&pb)?pa-pb:String(a.date).localeCompare(String(b.date));});
 }
@@ -1704,7 +1709,7 @@ function drillNestData(){
     const rides24h=parseFloat(r.rides_24h);
     if(!m[key]) m[key]={id:r.nest_id||'',addr:r.nest_address||r.nest_id||key,count:0,sumG:0,cntG:0,htrVals:[],cnt24h:0,qty:null};
     const b=m[key]; b.count++;
-    if(!isNaN(grr)&&grr>0){b.sumG+=grr;b.cntG++;}
+    if(!isNaN(grr)){b.sumG+=grr;b.cntG++;}
     if(!isNaN(htr)&&htr>0){b.htrVals.push(htr);}
     if(!isNaN(rides24h)&&rides24h>0){b.cnt24h++;}
     const qty=(r.nest_quantity!=null&&r.nest_quantity!=='')?parseInt(r.nest_quantity):NaN;
@@ -2127,7 +2132,7 @@ function _aggNests(rows){
     const htr=parseFloat(htrRaw);
     if(!m[nestId]) m[nestId]={nestId,address:r.nest_address||nestId,neighborhood:r.nest_neighborhood||r.neighborhood||'',lat,lon,count:0,sumG:0,cntG:0,sumH:0,cntH:0};
     const b=m[nestId]; b.count++;
-    if(!isNaN(grr)&&grr>0){b.sumG+=grr;b.cntG++;}
+    if(!isNaN(grr)){b.sumG+=grr;b.cntG++;}
     if(!isNaN(htr)&&htr>0){b.sumH+=htr;b.cntH++;}
   });
   return Object.values(m).map(b=>({...b,avgGRR:b.cntG?b.sumG/b.cntG:0,avgHTR:b.cntH?b.sumH/b.cntH:null}));
@@ -2724,9 +2729,9 @@ function renderSupplyGap(){
   const relGrid={}, nestAgg={};
   relParsed.forEach(r=>{if(!inWin(r.date))return;
     const n=nestAgg[r.nest]||(nestAgg[r.nest]={rel:0,sG:0,cG:0,hood:r.hood,addr:r.addr,cellGRR:{}});
-    n.rel++; if(!isNaN(r.grr)&&r.grr>0){n.sG+=r.grr;n.cG++;}
+    n.rel++; if(!isNaN(r.grr)){n.sG+=r.grr;n.cG++;}
     if(r.hr!=null){const k=r.nest+'|'+r.wd+'|'+r.hr;relGrid[k]=(relGrid[k]||0)+1;
-      const ck=r.wd+'|'+r.hr;const cg=n.cellGRR[ck]||(n.cellGRR[ck]={s:0,c:0});if(!isNaN(r.grr)&&r.grr>0){cg.s+=r.grr;cg.c++;}}});
+      const ck=r.wd+'|'+r.hr;const cg=n.cellGRR[ck]||(n.cellGRR[ck]={s:0,c:0});if(!isNaN(r.grr)){cg.s+=r.grr;cg.c++;}}});
   // recommended cells per nest
   const recCellsByNest={};
   Object.keys(recGrid).forEach(k=>{const p=k.split('|');const nest=p[0],wd=+p[1],hr=+p[2];(recCellsByNest[nest]=recCellsByNest[nest]||[]).push({wd,hr,slots:recGrid[k],filled:(relGrid[k]||0)>0});});
@@ -3524,7 +3529,7 @@ function initExecMap(){
     const lat=c[0], lon=c[1];
     const grr=parseFloat(r.gross_revenue_24h_usd)||0;
     if(!nestMap[id]) nestMap[id]={lat,lon,sumGRR:0,cntGRR:0};
-    if(grr>0){nestMap[id].sumGRR+=grr;nestMap[id].cntGRR++;}
+    nestMap[id].sumGRR+=grr;nestMap[id].cntGRR++;
   });
   let nests=Object.values(nestMap).map(n=>({...n,avgGRR:n.cntGRR>0?n.sumGRR/n.cntGRR:0}));
   if(!nests.length) nests=NEST_GRR_DATA.map(n=>({lat:n.lat,lon:n.lon,avgGRR:n.avg_grr||0}));

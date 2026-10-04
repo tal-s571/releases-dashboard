@@ -495,6 +495,39 @@ function setHourRange(){
 }
 function clearDayHour(){ daySel=new Set(); hourSel=new Set(); hoodSel=new Set(); render(); }
 function toggleHood(name){ if(hoodSel.has(name))hoodSel.delete(name); else hoodSel.add(name); render(); }
+
+// One-click preset: the "North Tel Aviv Project" neighborhoods. Matching ignores
+// repeated/extra spaces (the data has e.g. "Tel Aviv -  Ramat Aviv") and uses
+// the exact spelling found in the loaded data, so the normal filter matches.
+const NORTH_TLV_PROJECT=[
+  'Tel Aviv - Hadar Yosef - Neot Afeka A','Tel Aviv - Kochav Hasafon','Tel Aviv - Lamed',
+  'Tel Aviv - Maoz Aviv A','Tel Aviv - Nave Avivim','Tel Aviv - Ramat Aviv',
+  'Tel Aviv - Ramat Aviv G - Ezorei Chen','Tel Aviv - Ramat Aviv HaHadasha - Nofei Yam',
+  'Tel Aviv - Ramat Aviv South','Tel Aviv - Ramat HaHayal - Tzahala',
+  'Tel Aviv - Tel Aviv University','Tel Aviv - Tel Baruch - Afeka'
+];
+const normHood=s=>String(s||'').replace(/\s+/g,' ').trim().toLowerCase();
+let _ntpCache={ref:null,names:null};
+function northTlvProjectNames(){
+  if(_ntpCache.ref===rawData) return _ntpCache.names;
+  const want=new Set(NORTH_TLV_PROJECT.map(normHood));
+  const found=new Set();
+  rawData.forEach(r=>{ const h=(r.neighborhood||'').trim(); if(h&&want.has(normHood(h))) found.add(h); });
+  _ntpCache={ref:rawData,names:found};
+  return found;
+}
+function northTlvProjectActive(){
+  const names=northTlvProjectNames();
+  return names.size>0 && hoodSel.size===names.size && [...names].every(n=>hoodSel.has(n));
+}
+function toggleNorthTlvProject(){
+  if(northTlvProjectActive()){ hoodSel=new Set(); }
+  else {
+    hoodSel=new Set(northTlvProjectNames());
+    if(citySel!=='__all__') citySel='Tel Aviv';
+  }
+  render();
+}
 // Searchable multi-select neighborhood picker
 function renderHoodPicker(){
   const label = hoodSel.size ? `${hoodSel.size} area${hoodSel.size>1?'s':''} selected` : 'All areas';
@@ -504,6 +537,7 @@ function renderHoodPicker(){
       <span>${label}</span><span style="opacity:.6">▾</span>
     </button>
     ${hoodSel.size?`<button onclick="hoodSel=new Set();render()" style="background:none;border:none;color:var(--accent);cursor:pointer;font-size:11px;font-weight:600">reset</button>`:''}
+    ${northTlvProjectNames().size?`<button onclick="toggleNorthTlvProject()" title="Select the ${northTlvProjectNames().size} North Tel Aviv Project neighborhoods" style="padding:5px 10px;border-radius:6px;border:1px solid ${northTlvProjectActive()?'var(--accent)':'var(--border)'};background:${northTlvProjectActive()?'var(--accent)':'var(--s2)'};color:${northTlvProjectActive()?'#fff':'var(--t2)'};font-size:12px;font-weight:700;cursor:pointer">North Tel Aviv Project</button>`:''}
   </div>`;
 }
 function toggleHoodDropdown(ev){

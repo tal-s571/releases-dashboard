@@ -3396,6 +3396,48 @@ function renderExecSummary(){
       </tr></tbody>
     </table></div>`;
 
+  // ── North Tel Aviv Project — the 12 named neighborhoods. Same layout as the
+  // unfulfilled-demand table: a plain row per neighborhood plus a Summary row
+  // (all 12 together) carrying the vs-last-week / vs-rest comparison. Matching
+  // ignores repeated spaces in neighborhood names (see NORTH_TLV_PROJECT). ──
+  const ntpSet=new Set(NORTH_TLV_PROJECT.map(normHood));
+  const inNtp=r=>ntpSet.has(normHood(r.neighborhood));
+  const ntpAllRows=allWeekData.filter(inNtp);
+  const ntpRestRows=allWeekData.filter(r=>!inNtp(r));
+  const ntpPrevRows=prevWeekData?prevWeekData.filter(inNtp):null;
+  const ntpSummaryStats=ntpAllRows.length?computeStats(ntpAllRows):null;
+  const ntpRestStats=ntpRestRows.length?computeStats(ntpRestRows):null;
+  const ntpSummaryPrevStats=ntpPrevRows&&ntpPrevRows.length?computeStats(ntpPrevRows):null;
+  const ntpRows=NORTH_TLV_PROJECT.map(name=>{
+    const k=normHood(name);
+    const rows=allWeekData.filter(r=>normHood(r.neighborhood)===k);
+    return {name,stats:rows.length?computeStats(rows):null};
+  }).sort((a,b)=>(b.stats?b.stats.count:0)-(a.stats?a.stats.count:0));
+  const ntpTableHtml=northTlvProjectNames().size?`
+    <div style="max-width:50%;overflow-x:auto">
+    <table style="width:auto;border-collapse:collapse;font-size:12px">
+      <thead><tr style="background:#F8FAFC;border-bottom:2px solid #E2E8F0">
+        ${['Neighborhood','Releases','Avg GR/RLS','Med HTR','Capture (24h)'].map(h=>`<th style="padding:4px 8px;text-align:left;font-size:8.5px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:#94A3B8;white-space:nowrap">${h}</th>`).join('')}
+      </tr></thead>
+      <tbody>${ntpRows.map(n=>`<tr style="border-bottom:1px solid #F1F5F9">
+        <td style="padding:5px 8px;font-size:11px;color:#0D1B3E;white-space:nowrap">${n.name}</td>
+        <td style="padding:5px 8px;font-weight:700;color:#0D1B3E">${fmtN(n.stats?n.stats.count:0)}</td>
+        <td style="padding:5px 8px;font-weight:700;color:#29C6F0">${n.stats?fmt$(n.stats.avgGRR):'—'}</td>
+        <td style="padding:5px 8px;color:#475569">${n.stats?fmtH(n.stats.avgHTR):'—'}</td>
+        <td style="padding:5px 8px;color:#475569">${n.stats&&n.stats.captureRate24h!=null?(n.stats.captureRate24h*100).toFixed(0)+'%':'—'}</td>
+      </tr>`).join('')}
+      <tr style="border-top:2px solid #E2E8F0;background:#F8FAFC">
+        <td style="padding:5px 8px;font-weight:700;color:#0D1B3E">Summary</td>
+        <td style="padding:5px 8px">
+          <div style="font-weight:700;color:#0D1B3E">${fmtN(ntpSummaryStats?ntpSummaryStats.count:0)}</div>
+          ${ntpSummaryPrevStats?`<div style="font-size:9px;margin-top:1px;white-space:nowrap"><span style="color:#94A3B8">wk:</span> ${wow((ntpSummaryStats?ntpSummaryStats.count:0)-ntpSummaryPrevStats.count,false,'n',pctOf((ntpSummaryStats?ntpSummaryStats.count:0)-ntpSummaryPrevStats.count,ntpSummaryPrevStats.count))}</div>`:''}
+        </td>
+        <td style="padding:5px 8px">${unfulfilledSummaryCellHtml(ntpSummaryStats?ntpSummaryStats.avgGRR:null,fmt$,ntpSummaryPrevStats?ntpSummaryPrevStats.avgGRR:null,ntpRestStats?ntpRestStats.avgGRR:null,'$',false)}</td>
+        <td style="padding:5px 8px">${unfulfilledSummaryCellHtml(ntpSummaryStats?ntpSummaryStats.avgHTR:null,fmtH,ntpSummaryPrevStats?ntpSummaryPrevStats.avgHTR:null,ntpRestStats?ntpRestStats.avgHTR:null,'h',true)}</td>
+        <td style="padding:5px 8px">${unfulfilledCaptureCellHtml(ntpSummaryStats?ntpSummaryStats.captureRate24h:null,ntpSummaryPrevStats?ntpSummaryPrevStats.captureRate24h:null,ntpRestStats?ntpRestStats.captureRate24h:null)}</td>
+      </tr></tbody>
+    </table></div>`:'';
+
   // ── type table — releases / GR/RLS / HTR, each with WoW ──
   const totalRelPrev=overallPrev?overallPrev.count:null;
   const typeTableHtml=`
@@ -3529,6 +3571,10 @@ function renderExecSummary(){
       <div style="${lbl};display:flex;align-items:center;justify-content:space-between">🎯 Unfulfilled Demand Nests <span style="text-transform:none;letter-spacing:0;font-weight:500;color:#CBD5E1">vs last week &amp; vs rest of nests this week</span></div>
       ${unfulfilledTableHtml}
     </div>
+    ${ntpTableHtml?`<div data-tbl style="padding:10px 16px;border-bottom:1px solid #E2E8F0">
+      <div style="${lbl};display:flex;align-items:center;justify-content:space-between">📍 North Tel Aviv Project <span style="text-transform:none;letter-spacing:0;font-weight:500;color:#CBD5E1">vs last week &amp; vs rest of areas this week</span> ${csvBtn('north-tel-aviv-project')}</div>
+      ${ntpTableHtml}
+    </div>`:''}
     <div style="display:grid;grid-template-columns:1.15fr 1fr;gap:0;border-bottom:1px solid #E2E8F0">
       <div data-tbl style="padding:10px 16px;border-right:1px solid #E2E8F0">
         <div style="${lbl};display:flex;align-items:center;justify-content:space-between">Top 10 Neighborhoods by Release Volume ${csvBtn('exec-top-neighborhoods')}</div>

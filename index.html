@@ -188,6 +188,8 @@ tbody tr:last-child td{border-bottom:none}
   <button class="tab-btn active" data-tab="__overview__">Overview</button>
 </div>
 
+<div id="freshnessBanner" style="display:none;padding:9px 18px;background:rgba(245,158,11,.14);border-bottom:1px solid rgba(245,158,11,.5);color:#FBBF24;font-size:12px;line-height:1.5"></div>
+
 <div id="weekBar">
   <button id="allWeeksBtn" style="padding:4px 12px;border-radius:20px;font-size:11px;font-weight:700;border:1px solid var(--accent);background:rgba(76,124,247,.15);color:var(--accent);transition:all .15s" onclick="setAllWeeks()">All Weeks</button>
   <div style="width:1px;height:16px;background:var(--border);margin:0 2px"></div>
@@ -3964,10 +3966,36 @@ function applyReleases(rows,{persist=true}={}){
   badge.className='loaded';
   const clr=document.getElementById('clearDataBtn'); if(clr) clr.style.display='inline-block';
   render();
+  updateFreshnessBanner();
   if(persist){
     idbSet('releasesRows', JSON.stringify(rawData))
       .then(()=>console.log('saved',rawData.length,'rows'))
       .catch(e=>{ console.warn('persist failed',e); alert('Could not save data for next time (browser storage limit). It still works this session.'); });
+  }
+}
+// The warehouse sometimes hasn't finished loading the last hours of the final
+// day when a report is pulled right after a week closes (seen 2026-09-28: the
+// Sunday 18:xx–23:xx tasks were missing, so Tel Aviv week 39 showed 4,508
+// instead of the settled 4,777). A complete final day has releases late in the
+// evening, so if the newest day's last release is before 22:00, warn.
+function updateFreshnessBanner(){
+  const el=document.getElementById('freshnessBanner'); if(!el) return;
+  const pad=n=>String(n).padStart(2,'0');
+  let lastDate='', lastTime='';
+  for(const r of rawData){
+    const m=String(r.release_date||'').match(/(\d{4})-(\d+)-(\d+)/);
+    if(!m) continue;
+    const d=`${m[1]}-${pad(m[2])}-${pad(m[3])}`;
+    let t=String(r.release_time||'').match(/(\d{1,2}):(\d{2})/);
+    t=t?`${pad(t[1])}:${t[2]}`:(r.release_hour!==''&&r.release_hour!=null?`${pad(parseInt(r.release_hour))}:00`:'');
+    if(!t) continue;
+    if(d>lastDate){lastDate=d;lastTime=t;} else if(d===lastDate&&t>lastTime){lastTime=t;}
+  }
+  if(lastDate&&lastTime&&lastTime<'22:00'){
+    el.innerHTML=`⚠️ <strong>Data for ${lastDate} stops at ${lastTime}.</strong> This export was probably pulled before the warehouse finished loading the end of that day, so the latest week's totals may be too low. Re-run the query later (e.g. Tuesday) and re-upload before reporting that week.`;
+    el.style.display='block';
+  } else {
+    el.style.display='none';
   }
 }
 function loadReleasesText(text,opts){ applyReleases(parseCSV(text),opts); }

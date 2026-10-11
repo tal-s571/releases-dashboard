@@ -2854,146 +2854,143 @@ function renderSupplyGap(){
 function renderQtyOptimizer(){
   if(!rawData.length) return '<div style="padding:40px;color:var(--t3);text-align:center">Upload a CSV to see quantity recommendations.</div>';
 
-  // Fixed trailing 14-day window, independent of the global week selector.
-  // (Still respects the city filter via byCity.) This keeps recommendations
-  // stable — browsing another week elsewhere no longer changes this tab.
-  const scoped = byCity(rawData);
-  const scopedDates = scoped.map(r=>parseDate(r.release_date)).filter(Boolean);
-  const maxT = scopedDates.length ? Math.max(...scopedDates.map(d=>d.getTime())) : 0;
-  const cutoff = maxT - 13*86400000;              // inclusive 14-day window
+  // ── RULE (Asaf's handoff, "Nest quantity rule") ─────────────────────────────
+  // Per nest over a trailing 28-day window (independent of the week selector):
+  //   zR = (ln(max(revenue,1)/effectiveQty) − R_MEAN) / R_STD     revenue per SPACE
+  //   zH = −(ln(median HTR) − H_MEAN) / H_STD                     lower HTR is better
+  //   score  = |zR−zH| ≥ 1.5 ? zR : 0.30·zR + 0.70·zH
+  //   kScore = count/(count+5);  Tmodel = C·exp(score·kScore)
+  //   target = round(currentQty + k·(Tmodel − currentQty)),  k = count/(count+5)
+  // Every city is calibrated from its OWN current window each run (R/H mean+sd,
+  // and C anchored so Σ Tmodel = Σ currentQty), so a run only redistributes.
+  const WINDOW_DAYS=28, W_REV=0.30, W_HTR=0.70, DISAGREE=1.5;
+  const SHRINK_K=5, SHRINK_M=5, BIND_FRAC=0.8, BIND_FLOOR=-0.5, MIN_CAL_NESTS=20;
+  const MIN_SHOW=3;      // show a nest at all
+  const MIN_REC=6;       // below this a nest is flagged "low conf" (shrinkage already limits its move)
+  const MAX_QTY=12;      // existing dashboard clamp, kept (the handoff doesn't set a cap)
+
+  const allDates = rawData.map(r=>parseDate(r.release_date)).filter(Boolean);
+  const maxT = allDates.length ? Math.max(...allDates.map(d=>d.getTime())) : 0;
+  const cutoff = maxT - (WINDOW_DAYS-1)*86400000;          // inclusive 28-day window
   const winDates = [];
-  const weekData = scoped.filter(r=>{
+  const weekData = rawData.filter(r=>{
     const d=parseDate(r.release_date);
     if(d && d.getTime()>=cutoff){ winDates.push(d); return true; }
     return false;
   });
+  const haveDays = new Set(winDates.map(d=>d.getTime())).size;
   const windowNote = winDates.length
-    ? `Based on the last 14 days · ${fmtDateRange(winDates)}`
-    : 'Based on the last 14 days';
+    ? `Based on the last ${WINDOW_DAYS} days · ${fmtDateRange(winDates)}${haveDays<WINDOW_DAYS?` · only ${haveDays} days in this file`:''}`
+    : `Based on the last ${WINDOW_DAYS} days`;
 
   // Current max-quantity may appear under several column names across exports
   const QTY_FIELDS=['nest_max_quantity','max_quantity','nest_max_qty','max_qty','current_quantity','nest_quantity','quantity'];
   const pickQty=r=>{for(const f of QTY_FIELDS){const v=r[f];if(v!=null&&v!==''){const p=parseInt(v);if(!isNaN(p))return p;}}return null;};
 
-  // Aggregate per nest
+  // Applied-change log (localStorage). The export stamps the CURRENT quantity on
+  // every historical row, so revenue earned under an older quantity would be
+  // divided by the new one. effectiveQty = time-weighted quantity in force.
+  const logByNest={};
+  loadQtyChangeLog().forEach(c=>{
+    const t=parseDate(c.date); if(!t) return;
+    (logByNest[c.nest_id]=logByNest[c.nest_id]||[]).push({t:t.getTime(),oldQty:+c.oldQty,newQty:+c.newQty});
+  });
+  const effectiveQtyOf=(id,currentQty)=>{
+    const ch=(logByNest[id]||[]).filter(c=>c.t>=cutoff&&c.t<=maxT).sort((a,b)=>a.t-b.t);
+    if(!ch.length) return currentQty;
+    const end=maxT+86400000;
+    let qty=ch[0].oldQty, prev=cutoff, acc=0;
+    ch.forEach(c=>{ acc+=qty*((c.t-prev)/86400000); qty=c.newQty; prev=c.t; });
+    acc+=qty*((end-prev)/86400000);
+    const eff=acc/((end-cutoff)/86400000);
+    return eff>0?eff:currentQty;
+  };
+
+  // Aggregate per nest (all cities — calibration is per city, not per view)
   const nestMap={};
   weekData.forEach(r=>{
     const id=r.nest_id; if(!id) return;
     if(!nestMap[id]) nestMap[id]={
       id, address:r.nest_address||id, neighborhood:r.nest_neighborhood||r.neighborhood||'',
-      count:0, sumGRR:0, cntGRR:0, sumHTR:0, cntHTR:0,
-      currentQty: pickQty(r)
+      city:(r.nest_city||r.city||'').trim(),
+      count:0, revenue:0, htrVals:[], peak:0, currentQty: pickQty(r)
     };
     const n=nestMap[id];
     n.count++;
+    // $0 releases count (revenue just adds 0) — a nest that often fails scores lower.
     const grr=parseFloat(r.gross_revenue_24h_usd);
-    // Count $0 releases in the denominator. Excluding them averaged only the
-    // releases that WORKED, so a nest failing 8 of 10 releases scored on the
-    // strength of the 2 that earned. 24.9% of releases earn $0, and that
-    // exclusion made these rows read ~33% above the headline KPI.
-    if(!isNaN(grr)){n.sumGRR+=grr;n.cntGRR++;}
+    if(!isNaN(grr)) n.revenue+=grr;
     const htr=parseFloat(r.hours_to_ride!=null&&r.hours_to_ride!==''?r.hours_to_ride:r.hours_to_first_ride);
-    if(!isNaN(htr)&&htr>0){n.sumHTR+=htr;n.cntHTR++;}
+    if(!isNaN(htr)&&htr>0) n.htrVals.push(htr);
+    const veh=parseFloat(r.avg_vehicles_in_nest_at_release_hour);
+    if(!isNaN(veh)&&veh>n.peak) n.peak=veh;
+    if(n.currentQty==null) n.currentQty=pickQty(r);
+    if(!n.city) n.city=(r.nest_city||r.city||'').trim();
   });
 
-  const MIN_SHOW=3;      // show a nest at all
-  const MIN_REC=6;       // enough signal to act on (else forced maintain / low confidence)
-  const nests=Object.values(nestMap).map(n=>({
+  const allNests=Object.values(nestMap).map(n=>({
     ...n,
-    avgGRR: n.cntGRR>0 ? n.sumGRR/n.cntGRR : 0,
-    avgHTR: n.cntHTR>0 ? n.sumHTR/n.cntHTR : null,
+    avgGRR: n.count>0 ? n.revenue/n.count : 0,          // display only (per release)
+    avgHTR: n.htrVals.length ? median(n.htrVals) : null, // median HTR
     lowConf: n.count<MIN_REC,
   })).filter(n=>n.count>=MIN_SHOW);
 
-  if(!nests.length) return '<div style="padding:40px;color:var(--t3);text-align:center">Not enough nest data in the last 14 days (need nest_id + ≥3 releases per nest).</div>';
+  if(!allNests.length) return `<div style="padding:40px;color:var(--t3);text-align:center">Not enough nest data in the last ${WINDOW_DAYS} days (need nest_id + ≥3 releases per nest).</div>`;
 
-  // Fleet mean + standard deviation for each metric (across nests, equal-weighted)
   const mean=a=>a.reduce((s,v)=>s+v,0)/(a.length||1);
   const std=(a,m)=>Math.sqrt(mean(a.map(v=>(v-m)*(v-m))))||1; // guard 0 → 1
-  const grrVals=nests.map(n=>n.avgGRR);
-  const fleetAvgGRR=mean(grrVals), stdGRR=std(grrVals,fleetAvgGRR);
-  const htrVals=nests.filter(n=>n.avgHTR!=null).map(n=>n.avgHTR);
-  const fleetAvgHTR=mean(htrVals), stdHTR=std(htrVals,fleetAvgHTR);
 
-  // Quantity baseline (z-scored the same way, so it's comparable to the perf score)
-  const qtyVals=nests.filter(n=>n.currentQty!=null).map(n=>n.currentQty);
-  const fleetAvgQty=mean(qtyVals), stdQty=std(qtyVals,fleetAvgQty);
+  // ── calibrate + score, city by city ─────────────────────────────────────────
+  const byCityNests={};
+  allNests.forEach(n=>{ (byCityNests[n.city||'—']=byCityNests[n.city||'—']||[]).push(n); });
+  Object.values(byCityNests).forEach(list=>{
+    // qty 0 = nest is off: no data to judge → renew at 1 for a fair re-test
+    list.filter(n=>n.currentQty===0).forEach(n=>{
+      n.rec='renew'; n.newQty=1; n.targetQty=1; n.score=50; n.renewed=true;
+    });
+    // nests with no known current quantity can't be assessed
+    list.filter(n=>n.currentQty==null).forEach(n=>{ n.rec='maintain'; n.newQty=null; n.score=50; });
 
-  // ── PERFORMANCE SCORE: each metric → 0–100 via z-score, weighted 70% GR/RLS + 30% HTR
-  // z = (nest − fleet mean) / std ; score = 50 + 25·z  (average nest = 50)
-  // Metrics are first SHRUNK toward the fleet mean by k = count/(count+K); a
-  // low-sample nest is pulled to the middle so noise can't produce extreme scores.
-  const SHRINK_K=5;
-  nests.forEach(n=>{
-    const k=n.count/(n.count+SHRINK_K);
-    const adjGRR=fleetAvgGRR + (n.avgGRR-fleetAvgGRR)*k;
-    const zGRR=(adjGRR-fleetAvgGRR)/stdGRR;
-    n.grrScore=Math.min(100,Math.max(0, 50 + 25*zGRR));           // higher GR/RLS = better
-    if(n.avgHTR!=null){
-      const adjHTR=fleetAvgHTR + (n.avgHTR-fleetAvgHTR)*k;
-      const zHTR=(adjHTR-fleetAvgHTR)/stdHTR;
-      n.htrScore=Math.min(100,Math.max(0, 50 - 25*zHTR));         // lower HTR = better
-    } else {
-      n.htrScore=50;                                               // neutral when unknown
+    list.forEach(n=>{ if(n.currentQty>0){ n.effQty=effectiveQtyOf(n.id,n.currentQty); n.logR=Math.log(Math.max(n.revenue,1)/n.effQty); n.logH=n.avgHTR!=null?Math.log(n.avgHTR):null; } });
+    const scorable=list.filter(n=>n.currentQty>0);
+    if(scorable.length<MIN_CAL_NESTS){
+      scorable.forEach(n=>{ n.rec='maintain'; n.newQty=n.currentQty; n.targetQty=n.currentQty; n.score=50; n.smallCity=true; });
+      return;
     }
-    n.score=Math.round(0.50*n.grrScore + 0.50*n.htrScore);
-
-    // ── RECOMMENDATION = supply mismatch, GATED by absolute performance ──
-    // Put current qty on the same 0–100 scale, compare, but never grow a
-    // below-average nest or shrink an above-average one.
-    if(n.currentQty!=null){
-      // ── RENEW: a nest that's currently OFF (qty 0) produced no releases, so
-      // it has no fresh data to judge. Auto-bring it back to 1 to give it a
-      // fair re-test next window (it lands as "low conf" until it re-accrues
-      // ≥6 releases, so it can't be turned straight back off). ──
-      if(n.currentQty===0){
-        n.rec='renew'; n.newQty=1; n.qtyScore=null; n.gap=null; n.watch=false; n.targetQty=1;
-        return;
-      }
-      const zQty=(n.currentQty-fleetAvgQty)/stdQty;
-      n.qtyScore=Math.min(100,Math.max(0, 50 + 25*zQty));
-      const gap=n.score-n.qtyScore;                                // + = under-supplied, − = over-supplied
-      n.gap=Math.round(gap);
-      const aboveAvg = n.score >= 50;                              // performs at/above fleet average
-      // Hysteresis dead-band: only act on a clear gap (±18). The 10–18 soft
-      // zone is left as "maintain" but flagged "watch" so near-threshold nests
-      // don't flip increase↔maintain run to run. Low-confidence nests never act.
-      const ENTER=18, WATCH=10;
-      if(n.lowConf){ n.rec='maintain'; }
-      else if(gap >= ENTER && aboveAvg) n.rec='increase';          // good nest that's clearly under-supplied
-      // Decrease is NOT gated on absolute score. `score` is centred on 50 by
-      // construction, so requiring score<50 made the top half of the fleet
-      // structurally un-shrinkable however oversupplied it was (49 nests were
-      // stuck at >=18pts oversupplied). `gap` already carries the relative
-      // judgement — double-gating on the median only froze it.
-      else if(gap <= -ENTER) n.rec='decrease';                      // clearly over-supplied for its performance
-      else n.rec='maintain';                                        // matched, or inside the dead-band
-      n.watch = n.rec==='maintain' && !n.lowConf && ((gap>=WATCH && aboveAvg) || gap<=-WATCH);
-      // Target = the quantity whose qty-score matches performance (invert the
-      // z-score mapping), clamped 1–12. Move toward it, but no more than ±2 at
-      // once so no nest jumps too far in a single run; direction stays gated.
-      const zTarget=(n.score-50)/25;
-      const targetQty=Math.min(12, Math.max(1, Math.round(fleetAvgQty + zTarget*stdQty)));
-      n.targetQty=targetQty;
-      let step = targetQty - n.currentQty;
-      step = Math.max(-2, Math.min(2, step));                       // cap jump at ±2
-      if(n.rec==='increase') step=Math.max(0, step);                // never move against the recommendation
-      else if(n.rec==='decrease') step=Math.min(0, step);
-      else step=0;                                                  // maintain → hold
-      n.newQty = Math.min(12, Math.max(1, n.currentQty + step));    // clamp 1–12 (qty-0 bumped to 1)
-
-      // ── RETIRE: turn a nest OFF (→0) only for the very worst cases — a
-      // confidently-sampled, bottom-tier performer that's already at the
-      // minimum quantity and can't fall any further. Deliberately strict so
-      // only genuine dead spots get pulled; the renew rule revives it later. ──
-      const RETIRE_SCORE=15;                                        // bottom ~15/100
-      if(!n.lowConf && n.score < RETIRE_SCORE && n.currentQty<=1){
-        n.rec='retire'; n.newQty=0;
-      }
-    } else {
-      n.rec='maintain'; n.newQty=null; n.qtyScore=null; n.gap=null; // can't assess mismatch without current qty
-    }
+    const rVals=scorable.map(n=>n.logR), hVals=scorable.filter(n=>n.logH!=null).map(n=>n.logH);
+    const R_MEAN=mean(rVals), R_STD=std(rVals,R_MEAN);
+    const H_MEAN=hVals.length?mean(hVals):0, H_STD=hVals.length?std(hVals,H_MEAN):1;
+    scorable.forEach(n=>{
+      const zR=(n.logR-R_MEAN)/R_STD;
+      const zH=n.logH!=null?-(n.logH-H_MEAN)/H_STD:0;      // unknown HTR → neutral
+      n.zR=zR; n.zH=zH;
+      n.scoreRaw = Math.abs(zR-zH)>=DISAGREE ? zR : W_REV*zR + W_HTR*zH;
+      n.kScore = n.count/(n.count+SHRINK_M);
+      n.damped = n.scoreRaw*n.kScore;
+    });
+    // C anchors the city to its existing total: Σ Tmodel = Σ currentQty
+    const C = scorable.reduce((s,n)=>s+n.currentQty,0) / scorable.reduce((s,n)=>s+Math.exp(n.damped),0);
+    scorable.forEach(n=>{
+      const Tmodel=C*Math.exp(n.damped);
+      const k=n.count/(n.count+SHRINK_K);
+      let target=Math.round(n.currentQty + k*(Tmodel-n.currentQty));   // no data → no move
+      // Cut guard: a nest that visibly holds vehicles is only cut on a clearly poor score
+      const binds = n.currentQty>0 && n.peak>=BIND_FRAC*n.currentQty;
+      n.binds=binds;
+      if(target<n.currentQty && binds && n.scoreRaw>=BIND_FLOOR) target=n.currentQty;
+      // No growth guard (occupancy ≠ demand) — growth beyond the most vehicles
+      // the nest has held is FLAGGED, not blocked.
+      target=Math.min(MAX_QTY, Math.max(1, target));
+      n.targetQty=target; n.newQty=target;
+      n.unbacked = target>n.currentQty && target>n.peak;
+      n.rec = target>n.currentQty ? 'increase' : target<n.currentQty ? 'decrease' : 'maintain';
+      n.score = Math.round(Math.min(100,Math.max(0, 50+25*n.damped)));   // 0–100 view of the rule's score
+    });
   });
+
+  // City filter only affects what is SHOWN — calibration above is per city.
+  const nests = (citySel==='__all__') ? allNests : allNests.filter(n=>(n.city||'—')===citySel);
+  if(!nests.length) return `<div style="padding:40px;color:var(--t3);text-align:center">No nests with enough data in ${citySel} for the last ${WINDOW_DAYS} days.</div>`;
 
   // Sort by score desc
   nests.sort((a,b)=>b.score-a.score);
@@ -3047,7 +3044,7 @@ function renderQtyOptimizer(){
       <td style="color:var(--t2)">${n.count}</td>
       <td>${scoreBar}</td>
       <td style="font-size:12px;font-variant-numeric:tabular-nums">${qtyCell}</td>
-      <td><span style="font-size:11px;font-weight:700;color:${m.color};background:${m.bg};padding:2px 9px;border-radius:10px">${m.icon} ${m.label}</span>${n.lowConf?' <span style="font-size:10px;color:var(--t3)" title="Fewer than 6 releases in the last 14 days — not enough signal to act">low conf</span>':n.watch?' <span style="font-size:10px;color:var(--warn,#e0a800)" title="Near the change threshold — watching">watch</span>':''}</td>
+      <td><span style="font-size:11px;font-weight:700;color:${m.color};background:${m.bg};padding:2px 9px;border-radius:10px">${m.icon} ${m.label}</span>${n.smallCity?' <span style="font-size:10px;color:var(--t3)" title="Fewer than 20 scorable nests in this city — too few to calibrate, left alone">small city</span>':n.lowConf?' <span style="font-size:10px;color:var(--t3)" title="Fewer than 6 releases in the last 28 days — the move is shrunk toward the current quantity">low conf</span>':''}${n.unbacked?' <span style="font-size:10px;color:var(--warn,#e0a800)" title="Target is above the most vehicles this nest has held in the window — flagged, not blocked">unbacked</span>':''}</td>
     </tr>`;
   }
 
@@ -3156,29 +3153,30 @@ function renderQtyOptimizer(){
       </div>
     </div>` : '';
 
+  const logCount=loadQtyChangeLog().length;
   const logicBox = `
     <div class="panel" style="margin-bottom:18px">
       <div class="panel-head"><span class="panel-title">How Recommendations Are Calculated</span></div>
       <div style="padding:14px 16px 6px;font-size:12px;color:var(--t2);line-height:1.7">
-        Computed over the <strong>last 14 days</strong> (independent of the week selector). We build two 0–100 scores per nest and compare them. A change is recommended only when supply is <strong>out of line</strong> with performance — a weak nest that already has a low quantity is correctly matched and stays put. To keep recommendations stable week-to-week, low-sample metrics are pulled toward the fleet average (<strong>shrinkage</strong>), nests with fewer than 6 releases are marked <em>low conf</em> and never change, and a change fires only past a <strong>±18-pt</strong> gap (the 10–18 "watch" zone holds at maintain). When a change is warranted the new quantity moves toward the nest's <strong>optimal</strong> level (the qty matching its performance), capped at <strong>±2</strong> per run.
+        Computed over the <strong>last ${WINDOW_DAYS} days</strong> (independent of the week selector). Each nest gets a target quantity from two things it already produces: <strong>revenue per space</strong> and <strong>how fast released vehicles get their first ride</strong>. Both are z-scored against the nest's <strong>own city</strong> (every city is re-calibrated from its own window each run), combined, and used to scale a per-city constant <strong>C</strong> that is anchored to the city's existing total — so a run <em>redistributes</em> spaces rather than adding them. The result is then <strong>shrunk toward the nest's current quantity</strong> by how much data it has: no data → no move.
       </div>
       <div style="padding:0 16px 14px;display:grid;grid-template-columns:1fr 1fr;gap:16px">
         <div>
-          <div style="font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--accent);margin-bottom:6px">Performance Score</div>
-          <div style="font-size:12px;color:var(--t2);line-height:1.7">Each metric is measured as standard deviations from the fleet average (z-score) → 0–100 with the average nest at 50. Combined <strong style="color:var(--accent)">50% GR/RLS + 50% HTR</strong> (HTR inverted — faster pickup is better). Missing HTR scores a neutral 50. GR/RLS here is revenue per release <strong>counting $0 releases</strong>, so a nest that often fails scores lower.</div>
+          <div style="font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--accent);margin-bottom:6px">Score</div>
+          <div style="font-size:12px;color:var(--t2);line-height:1.7"><code style="background:var(--s3);padding:1px 5px;border-radius:4px">zR</code> = z of ln(revenue ÷ effective qty) — revenue is floored at $1 (<strong>$0 releases count</strong>) and divided by the time-weighted quantity actually in force. <code style="background:var(--s3);padding:1px 5px;border-radius:4px">zH</code> = −z of ln(<strong>median</strong> HTR). Score = <strong>0.30·zR + 0.70·zH</strong> — but if revenue and HTR disagree by ≥1.5σ, <strong>believe revenue</strong> (score = zR). The score is damped by sample size (n/(n+5)) before exponentiating. The 0–100 bar is just 50 + 25·score.</div>
         </div>
         <div>
-          <div style="font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--accent);margin-bottom:6px">Quantity Score</div>
-          <div style="font-size:12px;color:var(--t2);line-height:1.7">The nest's current max-quantity put on the same 0–100 scale (average qty = 50). This represents how much supply the nest currently gets, so it's directly comparable to its performance.</div>
+          <div style="font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--accent);margin-bottom:6px">Guards</div>
+          <div style="font-size:12px;color:var(--t2);line-height:1.7"><strong>Cut guard:</strong> a nest whose peak occupancy reaches 80% of its quantity is only cut on a clearly poor score (&lt; −0.5). <strong>No growth guard</strong> — growth beyond the most vehicles a nest has held is flagged <em>unbacked</em>, not blocked. Cities with fewer than 20 scorable nests are left alone. Quantity is kept between 1 and ${MAX_QTY}. <strong>Applied-change log:</strong> ${logCount} change${logCount===1?'':'s'} on record${logCount?` (<a href="#" onclick="clearQtyChangeLog();return false" style="color:var(--accent)">clear</a>)`:''} — it is used so a nest cut 6→3 isn't scored as twice as productive next run.</div>
         </div>
       </div>
       <div style="padding:0 16px 14px;display:flex;gap:20px;flex-wrap:wrap">
-        <div style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--t2)"><span style="color:var(--good);font-weight:700">▲ Increase</span> Under-supplied by 18+ pts <em style="color:var(--t3)">and</em> performs above average</div>
-        <div style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--t2)"><span style="color:var(--accent);font-weight:700">— Maintain</span> Matched — or a strong nest that's already full / a weak one already lean</div>
-        <div style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--t2)"><span style="color:var(--bad);font-weight:700">▼ Decrease</span> Over-supplied by 18+ pts relative to its own performance</div>
-        <div style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--t2)"><span style="color:var(--bad);font-weight:700">⏻ Turn Off</span> Only the very worst — a confidently-sampled nest scoring below 15/100 that's already at qty 1</div>
+        <div style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--t2)"><span style="color:var(--good);font-weight:700">▲ Increase</span> Target quantity is above the current one</div>
+        <div style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--t2)"><span style="color:var(--accent);font-weight:700">— Maintain</span> Target rounds to the current quantity (or the cut guard held it)</div>
+        <div style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--t2)"><span style="color:var(--bad);font-weight:700">▼ Decrease</span> Target quantity is below the current one</div>
         <div style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--t2)"><span style="color:var(--accent);font-weight:700">↻ Renew</span> A nest currently off (qty 0) is brought back to 1 to re-test — it has no fresh data to judge</div>
       </div>
+      <div style="padding:0 16px 14px;font-size:11.5px;color:var(--t3);line-height:1.6">This ranks nests correctly out-of-sample; it does not prove that changing a nest's quantity <em>causes</em> better performance. Treat the first cycles as an experiment with a measurable before/after.</div>
     </div>`;
 
   const summary = `
@@ -3201,11 +3199,26 @@ function renderQtyOptimizer(){
       </div>
     </div>
     ${(retire.length||renew.length) ? `<div style="font-size:12px;color:var(--t2);margin:-8px 0 18px;display:flex;gap:18px;flex-wrap:wrap">
-      ${retire.length?`<span><span style="color:var(--bad);font-weight:700">⏻ ${retire.length} turned off</span> — bottom-tier nests already at qty 1 (score &lt;15)</span>`:''}
+      
       ${renew.length?`<span><span style="color:var(--accent);font-weight:700">↻ ${renew.length} renewing</span> — currently off, brought back to 1 to re-test</span>`:''}
     </div>` : ''}`;
 
   return summary + qtyDistPanel + hoodPanel + logicBox;
+}
+
+// Applied-change log: quantity changes you actually applied, so the next run
+// divides revenue by the quantity that was in force (not today's). Stored in
+// this browser only (localStorage).
+const QTY_LOG_KEY='qtyChangeLog.v1';
+function loadQtyChangeLog(){
+  try{ const j=JSON.parse(localStorage.getItem(QTY_LOG_KEY)||'[]'); return Array.isArray(j)?j:[]; }catch(e){ return []; }
+}
+function saveQtyChangeLog(arr){
+  try{ localStorage.setItem(QTY_LOG_KEY,JSON.stringify(arr)); return true; }catch(e){ return false; }
+}
+function clearQtyChangeLog(){
+  if(!confirm('Clear the applied-change log? Future runs will divide revenue by the current quantity again.')) return;
+  saveQtyChangeLog([]); render();
 }
 
 function downloadQtyCSV(){
@@ -3235,6 +3248,16 @@ function downloadQtyCSV(){
   a.href='data:text/csv;charset=utf-8,'+encodeURIComponent(csv);
   a.download='qty_recommendations.csv';
   document.body.appendChild(a);a.click();document.body.removeChild(a);
+
+  // Offer to record these as applied, so the next run corrects the denominator.
+  if(confirm(`Record these ${changed.length} changes as APPLIED today?\n\nOK = you are applying them now (the next run will divide revenue by the quantity actually in force).\nCancel = you are only reviewing them.`)){
+    const d=new Date(), pad=n=>String(n).padStart(2,'0');
+    const today=`${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+    const log=loadQtyChangeLog();
+    changed.forEach(n=>log.push({nest_id:n.id,date:today,oldQty:n.currentQty,newQty:n.newQty}));
+    if(!saveQtyChangeLog(log)) alert('Could not save the change log in this browser.');
+    render();
+  }
 }
 
 function renderExecSummary(){

@@ -2611,7 +2611,11 @@ function getExecData(){
     ? `Week ${execWeek.num} · ${execWeek.label}`
     : 'All Weeks';
 
-  return {overall,overallPrev,segments,bestDay,bestHour,worstDay,weekLabel,allWeekData,prevWeekData,prevByHood,prevWeek};
+  // Same weeks, but NOT narrowed by the city selector — used by the project tables
+  // that compare a nest group against its own city.
+  const weekRaw = execWeek ? rawData.filter(r=>parseInt(r.release_week)===execWeek.num) : rawData;
+  const prevWeekRaw = prevWeek ? rawData.filter(r=>parseInt(r.release_week)===prevWeek.num) : null;
+  return {overall,overallPrev,segments,bestDay,bestHour,worstDay,weekLabel,allWeekData,prevWeekData,prevByHood,prevWeek,weekRaw,prevWeekRaw};
 }
 
 // ── EXEC SUMMARY SLIDE HELPERS ────────────────────────────────────────────────
@@ -3271,7 +3275,7 @@ function downloadQtyCSV(){
 
 function renderExecSummary(){
   if(!rawData.length) return '<div style="padding:40px;color:var(--t3);text-align:center">No data loaded.</div>';
-  const {overall,overallPrev,weekLabel,prevByHood,allWeekData,prevWeekData}=getExecData();
+  const {overall,overallPrev,weekLabel,prevByHood,allWeekData,prevWeekData,weekRaw,prevWeekRaw}=getExecData();
 
   const prevWeekLabel = (()=>{
     const {prevWeek} = getExecData();
@@ -3476,6 +3480,77 @@ function renderExecSummary(){
       </tr></tbody>
     </table></div>`:'';
 
+  // ── Project nest groups: Lime strategic nests + unfulfilled-demand nests in
+  // Ashdod / Bat Yam. Same layout as the Unfulfilled Demand table (a plain row per
+  // nest + a Summary row with wk / rest comparisons), but "rest" is the REST OF THE
+  // SAME CITY, and a table only shows when its city is in view. A nest is matched on
+  // nest_id or raw_nest_id (the latter exists in the LITE/deep-analysis export and
+  // catches nests that aren't launched yet). `label` is only a fallback for nests
+  // with no releases in the data. ──
+  const GRP_LBL='font-size:9.5px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#94A3B8;margin-bottom:7px';
+  const NEST_GROUPS=[
+    {key:'lime',title:'⭐ Lime Strategic Nests',city:'Tel Aviv',restLabel:'rest of Tel Aviv',nests:[
+      {id:'796abb24-67f9-43de-b57f-b7e309f42cf0',label:'Dizengoff Center, Dizengoff St 50, Tel Aviv'},
+      {id:'762c565c-6c7b-42a2-acbe-25c97eef0b3e',label:'Sheinkin St 6, Tel Aviv'},
+      {id:'c509fcce-6c16-4f20-b706-bb27397c84c2',label:"Giv'at HaTahmoshet St 900, Tel Aviv"},
+      {id:'49f88cd2-c53d-420d-8ddd-e1d3869b9855',label:'Yitzhak Sadeh St 20, Tel Aviv'}]},
+    {key:'ashdod',title:'🎯 Unfulfilled Demand — Ashdod',city:'Ashdod',restLabel:'rest of Ashdod',nests:[
+      {id:'eae0b9f7-8300-4299-b368-fc460e1fb4e0',label:'Kinor St 34, Ashdod'},
+      {id:'6a984062-9f27-47be-a62e-8c71c6b980a9',label:'Kislev St 27, Ashdod'},
+      {id:'dbb53be1-2b2c-4a32-b859-ffa6b5005d03',label:'David Wolffsohn St 11, Ashdod'},
+      {id:'9889e2ff-e6f0-4d3c-875b-3acb3b032e7d',label:'Rogozin St 27, Ashdod'},
+      {id:'c40b677c-79e5-47d2-91e2-ebf1ad5819f7',label:'Ha-Khartsit St 18, Ashdod'}]},
+    {key:'batyam',title:'🎯 Unfulfilled Demand — Bat Yam',city:'Bat Yam',restLabel:'rest of Bat Yam',nests:[
+      {id:'11da736b-44b5-4388-8710-6dee1d994ef1',label:'Yohanan HaSandlar St 9, Bat Yam'}]},
+  ];
+  const nestGroupHtml=NEST_GROUPS.map(g=>{
+    if(citySel!=='__all__'&&citySel!==g.city) return '';
+    const inCity=rows=>rows.filter(r=>(r.city||'')===g.city);
+    const cityNow=inCity(weekRaw||[]);
+    if(!cityNow.length) return '';                       // that city isn't in this file/week
+    const ids=new Set(g.nests.map(n=>n.id));
+    const inGroup=r=>ids.has(r.nest_id)||ids.has(r.raw_nest_id);
+    const st=rows=>rows.length?computeStats(rows):null;
+    const nowRows=cityNow.filter(inGroup);
+    const prevRows=prevWeekRaw?inCity(prevWeekRaw).filter(inGroup):null;
+    const sumNow=st(nowRows), sumPrev=prevRows?st(prevRows):null, restNow=st(cityNow.filter(r=>!inGroup(r)));
+    const rowsHtml=g.nests.map(n=>{
+      const mine=cityNow.filter(r=>r.nest_id===n.id||r.raw_nest_id===n.id);
+      const stt=st(mine);
+      const any=mine[0]||(weekRaw||[]).find(r=>r.nest_id===n.id||r.raw_nest_id===n.id)||rawData.find(r=>r.nest_id===n.id||r.raw_nest_id===n.id);
+      const addr=(any&&any.nest_address)||n.label;
+      return `<tr style="border-bottom:1px solid #F1F5F9">
+        <td style="padding:5px 8px;font-size:11px;color:#0D1B3E">${addr}</td>
+        <td style="padding:5px 8px;font-weight:700;color:#0D1B3E">${fmtN(stt?stt.count:0)}</td>
+        <td style="padding:5px 8px;font-weight:700;color:#29C6F0">${stt?fmt$(stt.avgGRR):'—'}</td>
+        <td style="padding:5px 8px;color:#475569">${stt?fmtH(stt.avgHTR):'—'}</td>
+        <td style="padding:5px 8px;color:#475569">${stt&&stt.captureRate24h!=null?(stt.captureRate24h*100).toFixed(0)+'%':'—'}</td>
+      </tr>`;
+    }).join('');
+    const cnt=sumNow?sumNow.count:0;
+    const table=`<div style="max-width:50%;overflow-x:auto">
+      <table style="width:auto;border-collapse:collapse;font-size:12px">
+        <thead><tr style="background:#F8FAFC;border-bottom:2px solid #E2E8F0">
+          ${['Nest','Releases','Avg GR/RLS','Med HTR','Capture (24h)'].map(h=>`<th style="padding:4px 8px;text-align:left;font-size:8.5px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:#94A3B8;white-space:nowrap">${h}</th>`).join('')}
+        </tr></thead>
+        <tbody>${rowsHtml}
+        <tr style="border-top:2px solid #E2E8F0;background:#F8FAFC">
+          <td style="padding:5px 8px;font-weight:700;color:#0D1B3E">Summary</td>
+          <td style="padding:5px 8px">
+            <div style="font-weight:700;color:#0D1B3E">${fmtN(cnt)}</div>
+            ${sumPrev?`<div style="font-size:9px;margin-top:1px;white-space:nowrap"><span style="color:#94A3B8">wk:</span> ${wow(cnt-sumPrev.count,false,'n',pctOf(cnt-sumPrev.count,sumPrev.count))}</div>`:''}
+          </td>
+          <td style="padding:5px 8px">${unfulfilledSummaryCellHtml(sumNow?sumNow.avgGRR:null,fmt$,sumPrev?sumPrev.avgGRR:null,restNow?restNow.avgGRR:null,'$',false)}</td>
+          <td style="padding:5px 8px">${unfulfilledSummaryCellHtml(sumNow?sumNow.avgHTR:null,fmtH,sumPrev?sumPrev.avgHTR:null,restNow?restNow.avgHTR:null,'h',true)}</td>
+          <td style="padding:5px 8px">${unfulfilledCaptureCellHtml(sumNow?sumNow.captureRate24h:null,sumPrev?sumPrev.captureRate24h:null,restNow?restNow.captureRate24h:null)}</td>
+        </tr></tbody>
+      </table></div>`;
+    return `<div data-tbl style="padding:10px 16px;border-bottom:1px solid #E2E8F0">
+      <div style="${GRP_LBL};display:flex;align-items:center;justify-content:space-between">${g.title} <span style="text-transform:none;letter-spacing:0;font-weight:500;color:#CBD5E1">vs last week &amp; vs ${g.restLabel} this week</span> ${csvBtn('nests-'+g.key)}</div>
+      ${table}
+    </div>`;
+  }).join('');
+
   // ── type table — releases / GR/RLS / HTR, each with WoW ──
   const totalRelPrev=overallPrev?overallPrev.count:null;
   const typeTableHtml=`
@@ -3623,6 +3698,7 @@ function renderExecSummary(){
       <div style="${lbl};display:flex;align-items:center;justify-content:space-between">📍 North Tel Aviv Project <span style="text-transform:none;letter-spacing:0;font-weight:500;color:#CBD5E1">vs last week &amp; vs rest of areas this week</span> ${csvBtn('north-tel-aviv-project')}</div>
       ${ntpTableHtml}
     </div>`:''}
+    ${nestGroupHtml}
     <div style="display:grid;grid-template-columns:1.15fr 1fr;gap:0;border-bottom:1px solid #E2E8F0">
       <div data-tbl style="padding:10px 16px;border-right:1px solid #E2E8F0">
         <div style="${lbl};display:flex;align-items:center;justify-content:space-between">Top 10 Neighborhoods by Release Volume ${csvBtn('exec-top-neighborhoods')}</div>

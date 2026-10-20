@@ -638,7 +638,8 @@ function renderWeekendWeekday(data,prevData){
     if(pv==null||cur==null) return '';
     const d=cur-pv, good=inv?d<0:d>0, arr=d>0?'↑':d<0?'↓':'—';
     const col=Math.abs(d)<0.001?'var(--t3)':good?'var(--good)':'var(--bad)';
-    return `<div style="font-size:10px;font-weight:700;color:${col};margin-top:2px">${arr} ${d>0?'+':''}${fmt(d)} WoW</div>`;
+    const pc=pctChange(cur,pv);
+    return `<div style="font-size:10px;font-weight:700;color:${col};margin-top:2px">${arr} ${pc==null?(d>0?'+':'')+fmt(d):(d>0?'+':d<0?'-':'')+Math.abs(pc).toFixed(1)+'%'} WoW</div>`;
   };
   const col=(title,s,cmp,ps)=>`<div style="flex:1;padding:12px 16px">
     <div style="font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--t3);margin-bottom:8px">${title}</div>
@@ -686,6 +687,8 @@ function csvBtn(filename){
 function fmt$(v){ return v==null?'—':'$'+v.toFixed(2); }
 function fmtH(v){ return v==null?'—':v.toFixed(1)+'h'; }
 function fmtN(v){ return v==null?'—':v.toLocaleString(); }
+// Relative change vs a previous value, in percent (null when there is no usable base).
+function pctChange(cur,prev){ return (cur==null||prev==null||!prev)?null:(cur-prev)/Math.abs(prev)*100; }
 function median(arr){
   if(!arr||!arr.length) return null;
   const s=[...arr].sort((a,b)=>a-b), m=Math.floor(s.length/2);
@@ -960,7 +963,8 @@ function renderCityComparison(data, prevData){
     if(Math.abs(d)<(fmt==='n'?0.5:fmt==='h'?0.05:0.005)) return `<span style="color:var(--t3);font-size:10.5px">▬</span>`;
     const good=inv?d<0:d>0, col=good?'var(--good)':'var(--bad)';
     const abs=fmt==='$'?'$'+Math.abs(d).toFixed(2):fmt==='h'?Math.abs(d).toFixed(1)+'h':fmtN(Math.round(Math.abs(d)));
-    return `<span style="color:${col};font-weight:700;font-size:10.5px">${d>0?'▲ +':'▼ '}${abs}</span>`;
+    const pc=pctChange(cur,pv);
+    return `<span style="color:${col};font-weight:700;font-size:10.5px">${d>0?'▲ +':'▼ -'}${pc==null?abs:Math.abs(pc).toFixed(1)+'%'}</span>`;
   };
   const head=['#','City','Releases','Share',...(showWoW?['Δ WoW']:[]),'Avg GR/RLS',...(showWoW?['Δ WoW']:[]),'Med HTR',...(showWoW?['Δ WoW']:[]),'Capture (24h)']
     .map(h=>`<th style="padding:6px 10px;text-align:left;font-size:9px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--t3);white-space:nowrap">${h}</th>`).join('');
@@ -1024,7 +1028,7 @@ function renderWoWTable(){
                :fmt==='h'?Math.abs(d).toFixed(1)+'h'
                :fmtN(Math.round(Math.abs(d)));
       const pctTxt=(pct!=null&&isFinite(pct))?` <span style="opacity:.85">(${pct>0?'+':''}${pct.toFixed(0)}%)</span>`:'';
-      return `<td class="delta-cell ${good?'up':'down'}">${d>0?'↑ +':'↓ '}${abs}${pctTxt}</td>`;
+      return `<td class="delta-cell ${good?'up':'down'}">${d>0?'↑ +':'↓ -'}${(pct!=null&&isFinite(pct))?Math.abs(pct).toFixed(1)+'%':abs}</td>`;
     }
 
     return `<tr onclick="currentWeekIdx=${allWeeks.findIndex(x=>x.num===w.num)};compareOn=false;render()" style="cursor:pointer">
@@ -1052,11 +1056,11 @@ const PIE_COLORS=['#4C7CF7','#2DD4A0','#F5A623','#F0656A','#A78BFA','#38BDF8'];
 
 function renderKPIs(s,p){
   const htrCls=s.avgHTR!=null?(s.avgHTR<8?'good':s.avgHTR<15?'warn':'bad'):'';
-  const cntDelta=p?`<div class="kpi-delta ${s.count>p.count?'up':s.count<p.count?'down':'flat'}">${s.count>p.count?'↑':'↓'} ${Math.abs(s.count-p.count)} vs prev week</div>`:'';
-  const grrDelta=p?(()=>{const d=s.avgGRR-p.avgGRR;const cls=d>0?'up':d<0?'down':'flat';return `<div class="kpi-delta ${cls}">${d>0?'↑':'↓'} ${d>0?'+':''}$${Math.abs(d).toFixed(2)} vs prev week</div>`;})():'';
-  const htrDelta=p&&s.avgHTR!=null&&p.avgHTR!=null?(()=>{const d=s.avgHTR-p.avgHTR;const cls=d<0?'up':d>0?'down':'flat';return `<div class="kpi-delta ${cls}">${d<0?'↑':'↓'} ${Math.abs(d).toFixed(1)}h vs prev week</div>`;})():'';
+  const cntDelta=p?(()=>{const pc=pctChange(s.count,p.count);return `<div class="kpi-delta ${s.count>p.count?'up':s.count<p.count?'down':'flat'}">${s.count>p.count?'↑ +':'↓ -'}${pc==null?Math.abs(s.count-p.count):Math.abs(pc).toFixed(1)+'%'} vs prev week</div>`;})():'';
+  const grrDelta=p?(()=>{const d=s.avgGRR-p.avgGRR;const cls=d>0?'up':d<0?'down':'flat';const pc=pctChange(s.avgGRR,p.avgGRR);return `<div class="kpi-delta ${cls}">${d>0?'↑ +':'↓ -'}${pc==null?'$'+Math.abs(d).toFixed(2):Math.abs(pc).toFixed(1)+'%'} vs prev week</div>`;})():'';
+  const htrDelta=p&&s.avgHTR!=null&&p.avgHTR!=null?(()=>{const d=s.avgHTR-p.avgHTR;const cls=d<0?'up':d>0?'down':'flat';const pc=pctChange(s.avgHTR,p.avgHTR);return `<div class="kpi-delta ${cls}">${d<0?'↑ -':'↓ +'}${pc==null?Math.abs(d).toFixed(1)+'h':Math.abs(pc).toFixed(1)+'%'} vs prev week</div>`;})():'';
   const captureCls=s.captureRate24h!=null?(s.captureRate24h>=0.85?'good':s.captureRate24h>=0.6?'warn':'bad'):'';
-  const captureDelta=p&&s.captureRate24h!=null&&p.captureRate24h!=null?(()=>{const d=(s.captureRate24h-p.captureRate24h)*100;const cls=d>0?'up':d<0?'down':'flat';return `<div class="kpi-delta ${cls}">${d>0?'↑':'↓'} ${Math.abs(d).toFixed(1)}pp vs prev week</div>`;})():'';
+  const captureDelta=p&&s.captureRate24h!=null&&p.captureRate24h!=null?(()=>{const d=(s.captureRate24h-p.captureRate24h)*100;const cls=d>0?'up':d<0?'down':'flat';const pc=pctChange(s.captureRate24h,p.captureRate24h);return `<div class="kpi-delta ${cls}">${d>0?'↑ +':'↓ -'}${pc==null?Math.abs(d).toFixed(1)+'pp':Math.abs(pc).toFixed(1)+'% ('+(d>0?'+':'-')+Math.abs(d).toFixed(1)+'pp)'} vs prev week</div>`;})():'';
 
   // Always use week-level data for pie (not tab-filtered)
   const weekStats=computeStats(getWeekData())||s;
@@ -1221,7 +1225,10 @@ function renderTable(stats, prevStats){
     const good = cfg.dir===0 ? null : (cfg.dir>0 ? d>0 : d<0);
     const col = good===null ? 'var(--t3)' : good ? 'var(--good)' : 'var(--bad)';
     const arr = d>0?'▲':'▼';
-    return `<div class="wow-sub" style="color:${col}">${arr} ${d>0?'+':'−'}${cfg.fmt(d)}</div>`;
+    const pc=pctChange(cur,pv);
+    if(pc==null) return `<div class="wow-sub" style="color:${col}">${arr} ${d>0?'+':'−'}${cfg.fmt(d)}</div>`;
+    const pp=key==='captureRate24h'?` (${d>0?'+':'−'}${cfg.fmt(d)})`:'';
+    return `<div class="wow-sub" style="color:${col}">${arr} ${d>0?'+':'−'}${Math.abs(pc).toFixed(1)}%${pp}</div>`;
   }
 
   const cols=[
@@ -1310,8 +1317,9 @@ function renderOperatorTable(stats, prevStats){
         const dg=op.avgGRR-(prev.avgGRR||0);
         const cntCls=dc>0?'up':dc<0?'down':'flat';
         const grrCls=dg>0?'up':dg<0?'down':'flat';
-        deltaCells=`<td class="delta-cell ${cntCls}">${dc>0?'↑':'↓'} ${dc>0?'+':''}${dc}</td>`
-          +`<td class="delta-cell ${grrCls}">${dg>0?'↑':'↓'} ${dg>0?'+':''}$${Math.abs(dg).toFixed(2)}</td>`;
+        const pcC=pctChange(op.count,prev.count), pcG=pctChange(op.avgGRR,prev.avgGRR);
+        deltaCells=`<td class="delta-cell ${cntCls}">${dc>0?'↑ +':'↓ -'}${pcC==null?Math.abs(dc):Math.abs(pcC).toFixed(1)+'%'}</td>`
+          +`<td class="delta-cell ${grrCls}">${dg>0?'↑ +':'↓ -'}${pcG==null?'$'+Math.abs(dg).toFixed(2):Math.abs(pcG).toFixed(1)+'%'}</td>`;
       } else {
         deltaCells='<td style="color:var(--t3);font-size:11px">new</td><td></td>';
       }
@@ -2662,13 +2670,14 @@ function execHoodTable(hoods, overall, prevByHood){
       const prev    = prevByHood&&prevByHood[name];
       const grrDelta= prev ? d.avgGRR - prev.avgGRR : null;
       const cntDelta= prev ? d.count  - prev.count  : null;
-      function arrowCell(delta, inv, pfx){
+      function arrowCell(delta, inv, pfx, base){
         if(delta==null) return `<td style="padding:3px 5px 3px 0;color:#CBD5E1;font-size:10px">—</td>`;
         const good=inv?delta<0:delta>0;
         const col=good?'#16A34A':'#DC2626';
         const arr=delta>0?'▲':'▼';
-        const val=pfx==='$'?`$${Math.abs(delta).toFixed(2)}`:Math.abs(delta).toFixed(0);
-        return `<td style="padding:3px 5px 3px 0;font-size:10px;font-weight:700;color:${col};white-space:nowrap">${arr} ${delta>0?'+':''}${pfx==='$'?'':pfx}${val}</td>`;
+        const pc=base?delta/Math.abs(base)*100:null;
+        const val=pc!=null?Math.abs(pc).toFixed(1)+'%':(pfx==='$'?`$${Math.abs(delta).toFixed(2)}`:Math.abs(delta).toFixed(0));
+        return `<td style="padding:3px 5px 3px 0;font-size:10px;font-weight:700;color:${col};white-space:nowrap">${arr} ${delta>0?'+':'-'}${val}</td>`;
       }
       return `<tr style="background:${bg}">
         <td style="padding:3px 5px 3px 0;font-weight:600;color:#0D1B3E;font-size:11px;max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${name}</td>
@@ -2678,14 +2687,14 @@ function execHoodTable(hoods, overall, prevByHood){
             <span style="color:#0D1B3E;font-weight:700">${fmt$(d.avgGRR)}</span>
           </div>
         </td>
-        ${arrowCell(grrDelta,false,'$')}
+        ${arrowCell(grrDelta,false,'$',prev&&prev.avgGRR)}
         <td style="padding:3px 5px 3px 0">
           <div style="display:flex;align-items:center;gap:5px">
             <div style="width:${Math.round(relPct*50)}px;height:7px;background:#F59E0B;border-radius:2px;min-width:2px;max-width:50px;flex-shrink:0"></div>
             <span style="color:#475569">${fmtN(d.count)}</span>
           </div>
         </td>
-        ${arrowCell(cntDelta,false,'')}
+        ${arrowCell(cntDelta,false,'',prev&&prev.count)}
         <td style="padding:3px 0 3px 0;color:#475569">${fmtH(d.avgHTR)}</td>
       </tr>`;
     }).join('')}
@@ -3300,8 +3309,12 @@ function renderExecSummary(){
     const good=inv?d<0:d>0;
     const col=good?'#16A34A':'#DC2626';
     const abs=fmt==='$'?'$'+Math.abs(d).toFixed(2):fmt==='h'?Math.abs(d).toFixed(1)+'h':fmt==='%'?Math.abs(d).toFixed(1)+'pp':fmtN(Math.round(Math.abs(d)));
-    const pctTxt=(pct!=null&&isFinite(pct))?` <span style="opacity:.8;font-weight:600">(${pct>0?'+':''}${pct.toFixed(0)}%)</span>`:'';
-    return `<span style="color:${col};font-weight:700;font-size:10.5px">${d>0?'▲ +':'▼ '}${abs}${pctTxt}</span>`;
+    if(pct!=null&&isFinite(pct)){
+      // relative percent first; for capture (already a %) the point change stays in brackets
+      const ppTxt=fmt==='%'?` <span style="opacity:.8;font-weight:600">(${d>0?'+':'-'}${abs})</span>`:'';
+      return `<span style="color:${col};font-weight:700;font-size:10.5px">${d>0?'▲ +':'▼ -'}${Math.abs(pct).toFixed(1)}%${ppTxt}</span>`;
+    }
+    return `<span style="color:${col};font-weight:700;font-size:10.5px">${d>0?'▲ +':'▼ -'}${abs}</span>`;
   }
   const pctOf=(d,base)=>(base?d/base*100:null);
 
@@ -3392,8 +3405,8 @@ function renderExecSummary(){
   const unfulfilledCaptureCellHtml=(val,prevVal,restVal)=>{
     const pct=v=>v!=null?(v*100).toFixed(0)+'%':'—';
     const lines=[`<div style="font-weight:700;color:#0D1B3E">${pct(val)}</div>`];
-    if(val!=null&&prevVal!=null) lines.push(`<div style="font-size:9px;margin-top:1px;white-space:nowrap"><span style="color:#94A3B8">wk:</span> ${wow((val-prevVal)*100,false,'%',null)}</div>`);
-    if(val!=null&&restVal!=null) lines.push(`<div style="font-size:9px;margin-top:1px;white-space:nowrap"><span style="color:#94A3B8">rest:</span> ${wow((val-restVal)*100,false,'%',null)}</div>`);
+    if(val!=null&&prevVal!=null) lines.push(`<div style="font-size:9px;margin-top:1px;white-space:nowrap"><span style="color:#94A3B8">wk:</span> ${wow((val-prevVal)*100,false,'%',pctOf(val-prevVal,prevVal))}</div>`);
+    if(val!=null&&restVal!=null) lines.push(`<div style="font-size:9px;margin-top:1px;white-space:nowrap"><span style="color:#94A3B8">rest:</span> ${wow((val-restVal)*100,false,'%',pctOf(val-restVal,restVal))}</div>`);
     return lines.join('');
   };
   const unfulfilledTableHtml=`
@@ -3487,7 +3500,7 @@ function renderExecSummary(){
           <td style="padding:3px 5px;color:#475569">${fmtH(d.avgHTR)}</td>
           <td style="padding:3px 5px;white-space:nowrap">${wow(hD,true,'h',pctOf(hD,p&&p.avgHTR))}</td>
           <td style="padding:3px 5px;color:#475569">${d.captureRate24h!=null?(d.captureRate24h*100).toFixed(0)+'%':'—'}</td>
-          <td style="padding:3px 5px;white-space:nowrap">${wow(cD!=null?cD*100:null,false,'%',null)}</td>
+          <td style="padding:3px 5px;white-space:nowrap">${wow(cD!=null?cD*100:null,false,'%',cD!=null?pctOf(cD,p.captureRate24h):null)}</td>
         </tr>`;
       }).join('')}
       <tr style="border-top:2px solid #E2E8F0;background:#F8FAFC">
@@ -3500,7 +3513,7 @@ function renderExecSummary(){
         <td style="padding:4px 5px;color:#475569">${fmtH(overall.avgHTR)}</td>
         <td style="padding:4px 5px;white-space:nowrap">${wow(overallPrev&&overall.avgHTR!=null&&overallPrev.avgHTR!=null?overall.avgHTR-overallPrev.avgHTR:null,true,'h',(overallPrev&&overall.avgHTR!=null&&overallPrev.avgHTR!=null)?pctOf(overall.avgHTR-overallPrev.avgHTR,overallPrev.avgHTR):null)}</td>
         <td style="padding:4px 5px;color:#475569">${overall.captureRate24h!=null?(overall.captureRate24h*100).toFixed(0)+'%':'—'}</td>
-        <td style="padding:4px 5px;white-space:nowrap">${wow(overallPrev&&overall.captureRate24h!=null&&overallPrev.captureRate24h!=null?(overall.captureRate24h-overallPrev.captureRate24h)*100:null,false,'%',null)}</td>
+        <td style="padding:4px 5px;white-space:nowrap">${wow(overallPrev&&overall.captureRate24h!=null&&overallPrev.captureRate24h!=null?(overall.captureRate24h-overallPrev.captureRate24h)*100:null,false,'%',overallPrev&&overall.captureRate24h!=null&&overallPrev.captureRate24h!=null?pctOf(overall.captureRate24h-overallPrev.captureRate24h,overallPrev.captureRate24h):null)}</td>
       </tr></tbody>
     </table></div>`;
 
@@ -3526,7 +3539,7 @@ function renderExecSummary(){
           <td style="padding:4px 8px">${wow(gD,false,'$',pctOf(gD,ph&&ph.avgGRR))}</td>
           <td style="padding:4px 8px;color:#475569">${fmtH(h.avgHTR)}</td>
           <td style="padding:4px 8px;color:#475569">${h.captureRate24h!=null?(h.captureRate24h*100).toFixed(0)+'%':'—'}</td>
-          <td style="padding:4px 8px">${wow(cD,false,'%',null)}</td>
+          <td style="padding:4px 8px">${wow(cD,false,'%',cD!=null?pctOf(cD,ph.captureRate24h*100):null)}</td>
         </tr>`;
       }).join('')}</tbody>
     </table>`;
@@ -3770,9 +3783,9 @@ function downloadPPTX(){
   addSlide('V2 Release Performance', s=>{
     // KPIs (full width, top)
     const kpis=[
-      {l:'Total Releases',v:fmtN(overall.count),d:overallPrev?`${overall.count>overallPrev.count?'↑ +':'↓ '}${Math.abs(overall.count-overallPrev.count)} WoW`:null,ok:overall.count>=(overallPrev?.count||0)},
-      {l:'Avg GR/RLS',v:fmt$(overall.avgGRR),d:overallPrev?`${overall.avgGRR>overallPrev.avgGRR?'↑ +':'↓ '}$${Math.abs(overall.avgGRR-overallPrev.avgGRR).toFixed(2)} WoW`:null,ok:overall.avgGRR>=(overallPrev?.avgGRR||0)},
-      {l:'Avg HTR',v:fmtH(overall.avgHTR),d:overallPrev&&overall.avgHTR!=null&&overallPrev.avgHTR!=null?`${overall.avgHTR<overallPrev.avgHTR?'↑ -':'↓ +'}${Math.abs(overall.avgHTR-overallPrev.avgHTR).toFixed(1)}h WoW`:null,ok:overall.avgHTR!=null&&overallPrev?.avgHTR!=null&&overall.avgHTR<overallPrev.avgHTR},
+      {l:'Total Releases',v:fmtN(overall.count),d:overallPrev?`${overall.count>overallPrev.count?'↑ +':'↓ -'}${Math.abs(pctChange(overall.count,overallPrev.count)||0).toFixed(1)}% WoW`:null,ok:overall.count>=(overallPrev?.count||0)},
+      {l:'Avg GR/RLS',v:fmt$(overall.avgGRR),d:overallPrev?`${overall.avgGRR>overallPrev.avgGRR?'↑ +':'↓ -'}${Math.abs(pctChange(overall.avgGRR,overallPrev.avgGRR)||0).toFixed(1)}% WoW`:null,ok:overall.avgGRR>=(overallPrev?.avgGRR||0)},
+      {l:'Avg HTR',v:fmtH(overall.avgHTR),d:overallPrev&&overall.avgHTR!=null&&overallPrev.avgHTR!=null?`${overall.avgHTR<overallPrev.avgHTR?'↑ -':'↓ +'}${Math.abs(pctChange(overall.avgHTR,overallPrev.avgHTR)||0).toFixed(1)}% WoW`:null,ok:overall.avgHTR!=null&&overallPrev?.avgHTR!=null&&overall.avgHTR<overallPrev.avgHTR},
     ];
     kpis.forEach((k,i)=>kpiBox(s,0.3+i*4.3,0.85,4.0,k.l,k.v,k.d,k.ok));
 

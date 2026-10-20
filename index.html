@@ -3558,15 +3558,25 @@ function renderExecSummary(){
     </div>`;
 
   const kpiRowHtml=(()=>{
-    function kpi(label,val,delta,inv,prefix){
+    // Change vs last week is shown as a RELATIVE percent (delta ÷ last week's value).
+    // Ride Capture is itself a percent, so its point change is kept in brackets.
+    function kpi(label,val,delta,inv,prefix,prevVal){
       const d=delta!=null?(inv?-delta:delta):null;
       const good=d!=null&&d>0;
       const col=d==null?null:good?'#16A34A':'#DC2626';
-      const abs=d==null?null:(prefix==='$'?'$'+Math.abs(delta).toFixed(2):prefix==='%'?Math.abs(delta).toFixed(1)+'pp':Math.abs(delta).toFixed(prefix==='h'?1:0)+(prefix==='h'?'h':''));
+      let txt=null;
+      if(delta!=null){
+        if(prevVal){
+          txt=Math.abs(delta/prevVal*100).toFixed(1)+'%';
+          if(prefix==='%') txt+=` (${delta>0?'+':'-'}${Math.abs(delta).toFixed(1)}pp)`;
+        } else {
+          txt=prefix==='$'?'$'+Math.abs(delta).toFixed(2):prefix==='%'?Math.abs(delta).toFixed(1)+'pp':Math.abs(delta).toFixed(prefix==='h'?1:0)+(prefix==='h'?'h':'');
+        }
+      }
       return `<div style="padding:10px 16px;border-right:1px solid #E2E8F0">
         <div style="font-size:9.5px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#94A3B8;margin-bottom:4px">${label}</div>
         <div style="font-size:24px;font-weight:700;color:#0D1B3E;line-height:1;font-variant-numeric:tabular-nums">${val}</div>
-        ${d!=null?`<div style="margin-top:5px;font-size:11px;font-weight:700;color:${col}">${delta>0?'▲ +':'▼ '}${abs} WoW</div>`:'<div style="margin-top:5px;font-size:11px;color:#CBD5E1">no prev week</div>'}
+        ${d!=null?`<div style="margin-top:5px;font-size:11px;font-weight:700;color:${col}">${delta>0?'▲ +':'▼ -'}${txt} WoW</div>`:'<div style="margin-top:5px;font-size:11px;color:#CBD5E1">no prev week</div>'}
       </div>`;
     }
     const relD=overallPrev?overall.count-overallPrev.count:null;
@@ -3574,10 +3584,10 @@ function renderExecSummary(){
     const htrD=overallPrev&&overall.avgHTR!=null&&overallPrev.avgHTR!=null?overall.avgHTR-overallPrev.avgHTR:null;
     const capD=overallPrev&&overall.captureRate24h!=null&&overallPrev.captureRate24h!=null?(overall.captureRate24h-overallPrev.captureRate24h)*100:null;
     return `<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;border-bottom:1px solid #E2E8F0">
-      ${kpi('Total Releases',fmtN(overall.count),relD,false,'')}
-      ${kpi('Avg GR/RLS',fmt$(overall.avgGRR),grrD,false,'$')}
-      ${kpi('Med HTR',fmtH(overall.avgHTR),htrD,true,'h')}
-      ${kpi('Ride Capture (24h)',overall.captureRate24h!=null?(overall.captureRate24h*100).toFixed(1)+'%':'—',capD,false,'%')}
+      ${kpi('Total Releases',fmtN(overall.count),relD,false,'',overallPrev?overallPrev.count:null)}
+      ${kpi('Avg GR/RLS',fmt$(overall.avgGRR),grrD,false,'$',overallPrev?overallPrev.avgGRR:null)}
+      ${kpi('Med HTR',fmtH(overall.avgHTR),htrD,true,'h',overallPrev?overallPrev.avgHTR:null)}
+      ${kpi('Ride Capture (24h)',overall.captureRate24h!=null?(overall.captureRate24h*100).toFixed(1)+'%':'—',capD,false,'%',overallPrev&&overallPrev.captureRate24h!=null?overallPrev.captureRate24h*100:null)}
     </div>`;
   })();
 

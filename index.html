@@ -3489,7 +3489,7 @@ function renderExecSummary(){
   // with no releases in the data. ──
   const GRP_LBL='font-size:9.5px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#94A3B8;margin-bottom:7px';
   const NEST_GROUPS=[
-    {key:'lime',title:'⭐ Lime Strategic Nests',city:'Tel Aviv',restLabel:'rest of Tel Aviv',nests:[
+    {key:'lime',title:'⭐ Lime Strategic Nests',city:'Tel Aviv',restLabel:'rest of Tel Aviv',showQty:true,nests:[
       {id:'796abb24-67f9-43de-b57f-b7e309f42cf0',label:'Dizengoff Center, Dizengoff St 50, Tel Aviv'},
       {id:'762c565c-6c7b-42a2-acbe-25c97eef0b3e',label:'Sheinkin St 6, Tel Aviv'},
       {id:'c509fcce-6c16-4f20-b706-bb27397c84c2',label:"Giv'at HaTahmoshet St 900, Tel Aviv"},
@@ -3514,13 +3514,20 @@ function renderExecSummary(){
     const nowRows=cityNow.filter(inGroup);
     const prevRows=prevWeekRaw?inCity(prevWeekRaw).filter(inGroup):null;
     const sumNow=st(nowRows), sumPrev=prevRows?st(prevRows):null, restNow=st(cityNow.filter(r=>!inGroup(r)));
+    let qtySum=0, qtyKnown=false;
     const rowsHtml=g.nests.map(n=>{
       const mine=cityNow.filter(r=>r.nest_id===n.id||r.raw_nest_id===n.id);
       const stt=st(mine);
       const any=mine[0]||(weekRaw||[]).find(r=>r.nest_id===n.id||r.raw_nest_id===n.id)||rawData.find(r=>r.nest_id===n.id||r.raw_nest_id===n.id);
       const addr=(any&&any.nest_address)||n.label;
+      // current quantity on the nest (snapshot stamped on every row of the export)
+      const qRow=(weekRaw||[]).find(r=>(r.nest_id===n.id||r.raw_nest_id===n.id)&&r.nest_quantity!=null&&r.nest_quantity!=='')
+              ||rawData.find(r=>(r.nest_id===n.id||r.raw_nest_id===n.id)&&r.nest_quantity!=null&&r.nest_quantity!=='');
+      const qty=qRow?parseInt(qRow.nest_quantity):NaN;
+      if(!isNaN(qty)){ qtySum+=qty; qtyKnown=true; }
       return `<tr style="border-bottom:1px solid #F1F5F9">
         <td style="padding:5px 8px;font-size:11px;color:#0D1B3E">${addr}</td>
+        ${g.showQty?`<td style="padding:5px 8px;font-weight:700;color:#0D1B3E">${!isNaN(qty)?qty:'—'}</td>`:''}
         <td style="padding:5px 8px;font-weight:700;color:#0D1B3E">${fmtN(stt?stt.count:0)}</td>
         <td style="padding:5px 8px;font-weight:700;color:#29C6F0">${stt?fmt$(stt.avgGRR):'—'}</td>
         <td style="padding:5px 8px;color:#475569">${stt?fmtH(stt.avgHTR):'—'}</td>
@@ -3531,11 +3538,12 @@ function renderExecSummary(){
     const table=`<div style="max-width:50%;overflow-x:auto">
       <table style="width:auto;border-collapse:collapse;font-size:12px">
         <thead><tr style="background:#F8FAFC;border-bottom:2px solid #E2E8F0">
-          ${['Nest','Releases','Avg GR/RLS','Med HTR','Capture (24h)'].map(h=>`<th style="padding:4px 8px;text-align:left;font-size:8.5px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:#94A3B8;white-space:nowrap">${h}</th>`).join('')}
+          ${(g.showQty?['Nest','Qty','Releases','Avg GR/RLS','Med HTR','Capture (24h)']:['Nest','Releases','Avg GR/RLS','Med HTR','Capture (24h)']).map(h=>`<th ${h==='Qty'?'title="Current max quantity on the nest (snapshot at the export: run date − 2 days)" ':''}style="padding:4px 8px;text-align:left;font-size:8.5px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:#94A3B8;white-space:nowrap">${h}</th>`).join('')}
         </tr></thead>
         <tbody>${rowsHtml}
         <tr style="border-top:2px solid #E2E8F0;background:#F8FAFC">
           <td style="padding:5px 8px;font-weight:700;color:#0D1B3E">Summary</td>
+          ${g.showQty?`<td style="padding:5px 8px;font-weight:700;color:#0D1B3E">${qtyKnown?qtySum:'—'}</td>`:''}
           <td style="padding:5px 8px">
             <div style="font-weight:700;color:#0D1B3E">${fmtN(cnt)}</div>
             ${sumPrev?`<div style="font-size:9px;margin-top:1px;white-space:nowrap"><span style="color:#94A3B8">wk:</span> ${wow(cnt-sumPrev.count,false,'n',pctOf(cnt-sumPrev.count,sumPrev.count))}</div>`:''}

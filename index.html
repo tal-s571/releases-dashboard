@@ -3398,7 +3398,10 @@ function renderExecSummary(){
     const curRows=allWeekData.filter(r=>r.nest_id===nid);
     const anyRow=curRows[0]||allWeekData.find(r=>r.nest_id===nid)||rawData.find(r=>r.nest_id===nid);
     const address=anyRow?(anyRow.nest_address||nid):nid;
-    return { nid, address, stats:curRows.length?computeStats(curRows):null };
+    // current quantity on the nest (snapshot stamped on every row of the export)
+    const qRow=curRows.find(r=>r.nest_quantity!=null&&r.nest_quantity!=='')||rawData.find(r=>r.nest_id===nid&&r.nest_quantity!=null&&r.nest_quantity!=='');
+    const qty=qRow?parseInt(qRow.nest_quantity):NaN;
+    return { nid, address, qty, stats:curRows.length?computeStats(curRows):null };
   });
   const unfulfilledSummaryCellHtml=(val,fmtFn,prevVal,restVal,fmtCode,inv)=>{
     const lines=[`<div style="font-weight:700;color:#0D1B3E">${val!=null?fmtFn(val):'—'}</div>`];
@@ -3417,10 +3420,11 @@ function renderExecSummary(){
     <div style="max-width:33%;overflow-x:auto">
     <table style="width:auto;border-collapse:collapse;font-size:12px">
       <thead><tr style="background:#F8FAFC;border-bottom:2px solid #E2E8F0">
-        ${['Nest','Releases','Avg GR/RLS','Med HTR','Capture (24h)'].map(h=>`<th style="padding:4px 8px;text-align:left;font-size:8.5px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:#94A3B8;white-space:nowrap">${h}</th>`).join('')}
+        ${['Nest','Qty','Releases','Avg GR/RLS','Med HTR','Capture (24h)'].map(h=>`<th ${h==='Qty'?'title="Current max quantity on the nest (snapshot at the export: run date − 2 days)" ':''}style="padding:4px 8px;text-align:left;font-size:8.5px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:#94A3B8;white-space:nowrap">${h}</th>`).join('')}
       </tr></thead>
       <tbody>${unfulfilledRows.map(n=>`<tr style="border-bottom:1px solid #F1F5F9">
         <td style="padding:5px 8px;font-size:11px;color:#0D1B3E">${n.address}</td>
+        <td style="padding:5px 8px;font-weight:700;color:#0D1B3E">${!isNaN(n.qty)?n.qty:'—'}</td>
         <td style="padding:5px 8px;font-weight:700;color:#0D1B3E">${fmtN(n.stats?n.stats.count:0)}</td>
         <td style="padding:5px 8px;font-weight:700;color:#29C6F0">${n.stats?fmt$(n.stats.avgGRR):'—'}</td>
         <td style="padding:5px 8px;color:#475569">${n.stats?fmtH(n.stats.avgHTR):'—'}</td>
@@ -3428,6 +3432,7 @@ function renderExecSummary(){
       </tr>`).join('')}
       <tr style="border-top:2px solid #E2E8F0;background:#F8FAFC">
         <td style="padding:5px 8px;font-weight:700;color:#0D1B3E">Summary</td>
+        <td style="padding:5px 8px;font-weight:700;color:#0D1B3E">${unfulfilledRows.some(n=>!isNaN(n.qty))?unfulfilledRows.reduce((t,n)=>t+(isNaN(n.qty)?0:n.qty),0):'—'}</td>
         <td style="padding:5px 8px">
           <div style="font-weight:700;color:#0D1B3E">${fmtN(unfulfilledSummaryStats?unfulfilledSummaryStats.count:0)}</div>
           ${unfulfilledSummaryPrevStats?`<div style="font-size:9px;margin-top:1px;white-space:nowrap"><span style="color:#94A3B8">wk:</span> ${wow((unfulfilledSummaryStats?unfulfilledSummaryStats.count:0)-unfulfilledSummaryPrevStats.count,false,'n',pctOf((unfulfilledSummaryStats?unfulfilledSummaryStats.count:0)-unfulfilledSummaryPrevStats.count,unfulfilledSummaryPrevStats.count))}</div>`:''}

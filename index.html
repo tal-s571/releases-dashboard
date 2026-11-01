@@ -3564,6 +3564,79 @@ function renderExecSummary(){
     </div>`;
   }).join('');
 
+  // ── Eli (elibenisty2) on the Old North / Hayarkon top-20 nests: ONLY releases done by
+  // that operator, on those nests. Summary row compares with last week (wk) and with
+  // everyone else on the SAME nests this week (rest). Only nests he actually released
+  // to this week get a row. ──
+  const ELI_EMAIL='elibenisty2@gmail.com';
+  const ELI_NESTS=[
+    {id:'77f1e3de-dd08-4446-b064-1a3ada7f1d92',label:'Hadassa St 17, Tel Aviv-Yafo, Israel'},
+    {id:'8fbe8964-da68-457f-92e2-44d39cd65394',label:'Sderot Nordau 83, Tel Aviv-Jaffa, Israel'},
+    {id:'67c76cdd-7da3-4f8b-a09a-3df176bc2314',label:'Sderot Nordau 97, Tel Aviv-Jaffa, Israel'},
+    {id:'d1199f05-8275-46c8-8bf4-fcc5785d5840',label:'Weizmann St 46, Tel Aviv-Yafo, Israel'},
+    {id:'94b97fae-40fd-44fc-8e1c-5817503afaaf',label:'هتعروخا ביתן 10، Tel Aviv-Yafo, Israel'},
+    {id:'05f2eec1-e7a6-4f13-8a4f-10f216dbf4aa',label:'Yehoshu\'a Bin Nun St 5, Tel Aviv-Yafo, Israel'},
+    {id:'7b169802-dd6e-4b43-9161-65dafbf8a600',label:'Sderot Ben Gurion 79, Tel Aviv-Jaffa, Israel'},
+    {id:'b8805b5e-240a-41fd-8a1b-04e333a314a6',label:'Dizengoff St 205, Tel Aviv-Yafo, Israel'},
+    {id:'4b969afb-34dd-407f-8e8a-521925c85da8',label:'Basel St 2, Tel Aviv-Yafo, Israel'},
+    {id:'2a6c1ac0-aa21-4caf-a296-8eecb9ea29e4',label:'Elkharizi St 19, Tel Aviv-Yafo, Israel'},
+    {id:'1882ebfb-b68c-42ae-ab1d-a74e84736d16',label:'Dizengoff St 185, Tel Aviv-Yafo, Israel'},
+    {id:'7994b5fd-ec89-4352-b750-f3b8d5d3482f',label:'Zeev Jabotinsky St 141, Tel Aviv-Yafo, Israel'},
+    {id:'bf0f0093-90b9-4b48-adfc-57ef32c88a91',label:'Liberman St 10, Tel Aviv-Yafo, Israel'},
+    {id:'05f5dbc8-275b-47e3-b2fe-f634ed0a6f49',label:'Emanuel Haromi St 1, Tel Aviv-Yafo, Israel'},
+    {id:'ef7b43b3-c17e-4e77-b1bf-3a6f5d9664d1',label:'Yisha\'ayahu St 30, Tel Aviv-Yafo, Israel'},
+    {id:'4247603a-d655-4dd6-b836-96c60387f422',label:'Yirmeyahu St 54, Tel Aviv-Yafo, Israel'},
+    {id:'0133b155-3e8b-40b4-b190-202cb107a3d3',label:'Shlomo Ibn Gabirol St 138, Tel Aviv-Yafo, Israel'},
+    {id:'de1e9a1c-9289-4e0b-aae1-0464d7aa43e7',label:'Zeev Jabotinsky St 71, Ramat Gan, Israel'},
+    {id:'06146c00-6833-4716-937c-b13e2a0c51b0',label:'Basel St 51, Tel Aviv-Yafo, Israel'},
+    {id:'432a9906-0e5a-494d-8d86-4597189b5259',label:'הדסה 1'}
+  ];
+  const eliHtml=(()=>{
+    if(citySel!=='__all__'&&citySel!=='Tel Aviv') return '';
+    const wk=weekRaw||[];
+    const isEli=r=>String(r.operator_email||'').toLowerCase()===ELI_EMAIL;
+    if(!wk.some(isEli)) return '';                       // operator isn't in this file
+    const ids=new Set(ELI_NESTS.map(n=>n.id));
+    const inGroup=r=>ids.has(r.nest_id)||ids.has(r.raw_nest_id);
+    const st=rows=>rows.length?computeStats(rows):null;
+    const grpNow=wk.filter(inGroup);
+    const eliNow=grpNow.filter(isEli), othersNow=grpNow.filter(r=>!isEli(r));
+    const eliPrev=prevWeekRaw?prevWeekRaw.filter(inGroup).filter(isEli):null;
+    const sumNow=st(eliNow), sumPrev=eliPrev?st(eliPrev):null, othersStats=st(othersNow);
+    const perNest=ELI_NESTS.map(n=>{
+      const mine=eliNow.filter(r=>r.nest_id===n.id||r.raw_nest_id===n.id);
+      const any=mine[0];
+      return {addr:(any&&any.nest_address)||n.label, stats:st(mine)};
+    }).filter(x=>x.stats).sort((a,b)=>b.stats.count-a.stats.count);
+    const cnt=sumNow?sumNow.count:0;
+    const th=h=>`<th style="padding:4px 8px;text-align:left;font-size:8.5px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:#94A3B8;white-space:nowrap">${h}</th>`;
+    const rowsHtml=perNest.length?perNest.map(x=>`<tr style="border-bottom:1px solid #F1F5F9">
+        <td style="padding:5px 8px;font-size:11px;color:#0D1B3E">${x.addr}</td>
+        <td style="padding:5px 8px;font-weight:700;color:#0D1B3E">${fmtN(x.stats.count)}</td>
+        <td style="padding:5px 8px;font-weight:700;color:#29C6F0">${fmt$(x.stats.avgGRR)}</td>
+        <td style="padding:5px 8px;color:#475569">${fmtH(x.stats.avgHTR)}</td>
+        <td style="padding:5px 8px;color:#475569">${x.stats.captureRate24h!=null?(x.stats.captureRate24h*100).toFixed(0)+'%':'—'}</td>
+      </tr>`).join(''):`<tr><td colspan="5" style="padding:8px;font-size:11px;color:#94A3B8">No releases by this operator on these nests this week.</td></tr>`;
+    return `<div data-tbl style="padding:10px 16px;border-bottom:1px solid #E2E8F0">
+      <div style="${GRP_LBL};display:flex;align-items:center;justify-content:space-between">👤 Old North &amp; Hayarkon top-20 nests — ${ELI_EMAIL} only <span style="text-transform:none;letter-spacing:0;font-weight:500;color:#CBD5E1">${perNest.length} of ${ELI_NESTS.length} nests with releases by him · vs last week &amp; vs other operators on the same nests</span> ${csvBtn('eli-top20-nests')}</div>
+      <div style="max-width:50%;overflow-x:auto">
+      <table style="width:auto;border-collapse:collapse;font-size:12px">
+        <thead><tr style="background:#F8FAFC;border-bottom:2px solid #E2E8F0">${['Nest','Releases','Avg GR/RLS','Med HTR','Capture (24h)'].map(th).join('')}</tr></thead>
+        <tbody>${rowsHtml}
+        <tr style="border-top:2px solid #E2E8F0;background:#F8FAFC">
+          <td style="padding:5px 8px;font-weight:700;color:#0D1B3E">Summary</td>
+          <td style="padding:5px 8px">
+            <div style="font-weight:700;color:#0D1B3E">${fmtN(cnt)}</div>
+            ${sumPrev?`<div style="font-size:9px;margin-top:1px;white-space:nowrap"><span style="color:#94A3B8">wk:</span> ${wow(cnt-sumPrev.count,false,'n',pctOf(cnt-sumPrev.count,sumPrev.count))}</div>`:''}
+          </td>
+          <td style="padding:5px 8px">${unfulfilledSummaryCellHtml(sumNow?sumNow.avgGRR:null,fmt$,sumPrev?sumPrev.avgGRR:null,othersStats?othersStats.avgGRR:null,'$',false)}</td>
+          <td style="padding:5px 8px">${unfulfilledSummaryCellHtml(sumNow?sumNow.avgHTR:null,fmtH,sumPrev?sumPrev.avgHTR:null,othersStats?othersStats.avgHTR:null,'h',true)}</td>
+          <td style="padding:5px 8px">${unfulfilledCaptureCellHtml(sumNow?sumNow.captureRate24h:null,sumPrev?sumPrev.captureRate24h:null,othersStats?othersStats.captureRate24h:null)}</td>
+        </tr></tbody>
+      </table></div>
+    </div>`;
+  })();
+
   // ── type table — releases / GR/RLS / HTR, each with WoW ──
   const totalRelPrev=overallPrev?overallPrev.count:null;
   const typeTableHtml=`
@@ -3712,6 +3785,7 @@ function renderExecSummary(){
       ${ntpTableHtml}
     </div>`:''}
     ${nestGroupHtml}
+    ${eliHtml}
     <div style="display:grid;grid-template-columns:1.15fr 1fr;gap:0;border-bottom:1px solid #E2E8F0">
       <div data-tbl style="padding:10px 16px;border-right:1px solid #E2E8F0">
         <div style="${lbl};display:flex;align-items:center;justify-content:space-between">Top 10 Neighborhoods by Release Volume ${csvBtn('exec-top-neighborhoods')}</div>
